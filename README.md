@@ -12,6 +12,19 @@ Each vehicle folder is what must be installed into a twin container so an image 
 
 **Pinned PX4 for otter:** `v1.16.0-alpha2-441` (`9ac03f03eb`). The rover_differential guidance patch under `otter/px4/` applies to that tree.
 
+## Aquatic sandbox (dreamslab)
+
+A second water-world container, `digital-twin-aquatic` (image of the same name, committed
+from the Tempe Heron twin), listens on host port **40077**. It runs otter for local SITL
+tests (`ROS_DOMAIN_ID=84`, `GZ_PARTITION=aquatic`) and is the place to develop the next
+vehicle — an underwater drone — without touching production otter on `:40099`. No zenoh
+or DeepGIS enrollment yet; add a new callsign under this repo when that vehicle exists.
+
+```bash
+# install otter packs into the sandbox (on dreamslab)
+C=digital-twin-aquatic bash otter/install.sh
+```
+
 **Related:**
 
 - Twin image recipe (Locutus / kestrel): [`Open-UAV/openuav-turbovnc`](https://github.com/Open-UAV/openuav-turbovnc) `Dockerfile.twin` and `terrain/bishop_scarp/`
