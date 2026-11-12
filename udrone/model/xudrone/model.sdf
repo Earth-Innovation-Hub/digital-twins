@@ -1,0 +1,489 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version='1.9'>
+  <model name='xudrone'>
+    <pose>0 0 0 0 0 0</pose>
+    <self_collide>false</self_collide>
+    <static>false</static>
+
+    <!-- ============================================================ -->
+    <!--  Base link: torpedo hull                                      -->
+    <!--  Hull: 17 in (0.432 m) long, 10 in (0.254 m) diameter        -->
+    <!--  Total vehicle mass: 13 kg                                    -->
+    <!--    Body (hull+electronics+battery): 11.624 kg                 -->
+    <!--    4 × T200 thruster: 4 × 0.344 = 1.376 kg                   -->
+    <!--  12V 30Ah LiFePO4 battery (~3.8 kg) placed 31 mm forward     -->
+    <!--    of geometric center to balance rear thruster mass           -->
+    <!--  ⇒ overall CG at model origin (symmetric)                     -->
+    <!-- ============================================================ -->
+    <link name="base_link">
+      <inertial>
+        <!-- CG shifted 31 mm forward to balance 4 rear thrusters -->
+        <pose>0.031 0 0 0 0 0</pose>
+        <mass>11.624</mass>
+        <inertia>
+          <!-- Solid cylinder approx: r=0.127 m, L=0.432 m, m=11.624 kg -->
+          <!-- Ixx = m*r²/2,  Iyy = Izz = m*(3r²+L²)/12                -->
+          <ixx>0.094</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.228</iyy>
+          <iyz>0</iyz>
+          <izz>0.228</izz>
+        </inertia>
+      </inertial>
+      <gravity>true</gravity>
+
+      <!-- Heron-style displacement (~0.018 m^3, ~+5 kg net buoyancy). tempe_lake lakebed is visual-only. -->
+      <collision name="disp_0"><pose>-0.16 0 0 0 0 0</pose><geometry><box><size>0.14 0.18 0.18</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="disp_1"><pose>-0.05 0 0 0 0 0</pose><geometry><box><size>0.14 0.18 0.18</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="disp_2"><pose>0.05 0 0 0 0 0</pose><geometry><box><size>0.14 0.18 0.18</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="disp_3"><pose>0.16 0 0 0 0 0</pose><geometry><box><size>0.14 0.18 0.18</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+
+      <velocity_decay/>
+
+      <!-- Main hull cylinder (17 in long, 10 in diameter) -->
+      <visual name="hull_visual">
+        <pose>0 0 0 0 1.5707963 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.127</radius>
+            <length>0.432</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.15 0.30 0.50 1</ambient>
+          <diffuse>0.15 0.30 0.50 1</diffuse>
+          <specular>0.4 0.4 0.4 1</specular>
+        </material>
+      </visual>
+
+      <!-- Nose dome (hemisphere at front) -->
+      <visual name="nose_visual">
+        <pose>0.216 0 0 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.127</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.20 0.35 0.55 1</ambient>
+          <diffuse>0.20 0.35 0.55 1</diffuse>
+          <specular>0.4 0.4 0.4 1</specular>
+        </material>
+      </visual>
+
+      <!-- Tail cap (hemisphere at rear) -->
+      <visual name="tail_visual">
+        <pose>-0.216 0 0 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.127</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <ambient>0.10 0.25 0.45 1</ambient>
+          <diffuse>0.10 0.25 0.45 1</diffuse>
+          <specular>0.4 0.4 0.4 1</specular>
+        </material>
+      </visual>
+
+      <!-- Forward heading marker (orange fin on top-front) -->
+      <visual name="forward_marker">
+        <pose>0.15 0 0.133 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.08 0.01 0.02</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>1.0 0.4 0.0 1</ambient>
+          <diffuse>1.0 0.4 0.0 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Battery bay marker (visible stripe, centered slightly forward) -->
+      <visual name="battery_bay">
+        <pose>0.031 0 -0.128 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.16 0.12 0.003</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.9 0.7 0.1 1</ambient>
+          <diffuse>0.9 0.7 0.1 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Thruster mounting frame (rear ring) -->
+      <visual name="mount_ring_top">
+        <pose>-0.24 0 0.15 0 0 0</pose>
+        <geometry><box><size>0.01 0.30 0.01</size></box></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+      <visual name="mount_ring_bottom">
+        <pose>-0.24 0 -0.15 0 0 0</pose>
+        <geometry><box><size>0.01 0.30 0.01</size></box></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+      <visual name="mount_ring_port">
+        <pose>-0.24 0.15 0 0 0 0</pose>
+        <geometry><box><size>0.01 0.01 0.30</size></box></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+      <visual name="mount_ring_starboard">
+        <pose>-0.24 -0.15 0 0 0 0</pose>
+        <geometry><box><size>0.01 0.01 0.30</size></box></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+
+      <!-- ======== Sensors ======== -->
+
+      <!-- IMU -->
+      <sensor name="imu_sensor" type="imu">
+        <gz_frame_id>base_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>250</update_rate>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.00018665</stddev>
+                <dynamic_bias_stddev>3.8785e-05</dynamic_bias_stddev>
+                <dynamic_bias_correlation_time>1000</dynamic_bias_correlation_time></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.00018665</stddev>
+                <dynamic_bias_stddev>3.8785e-05</dynamic_bias_stddev>
+                <dynamic_bias_correlation_time>1000</dynamic_bias_correlation_time></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.00018665</stddev>
+                <dynamic_bias_stddev>3.8785e-05</dynamic_bias_stddev>
+                <dynamic_bias_correlation_time>1000</dynamic_bias_correlation_time></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.00186</stddev>
+                <dynamic_bias_stddev>0.006</dynamic_bias_stddev>
+                <dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.00186</stddev>
+                <dynamic_bias_stddev>0.006</dynamic_bias_stddev>
+                <dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.00186</stddev>
+                <dynamic_bias_stddev>0.006</dynamic_bias_stddev>
+                <dynamic_bias_correlation_time>300</dynamic_bias_correlation_time></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+
+      <!-- Pressure / depth -->
+      <sensor name="air_pressure_sensor" type="air_pressure">
+        <gz_frame_id>base_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>50</update_rate>
+        <air_pressure>
+          <pressure>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </pressure>
+        </air_pressure>
+      </sensor>
+
+      <!-- Magnetometer -->
+      <sensor name="magnetometer_sensor" type="magnetometer">
+        <gz_frame_id>base_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+        <magnetometer>
+          <x><noise type="gaussian"><stddev>0.0001</stddev></noise></x>
+          <y><noise type="gaussian"><stddev>0.0001</stddev></noise></y>
+          <z><noise type="gaussian"><stddev>0.0001</stddev></noise></z>
+        </magnetometer>
+      </sensor>
+
+      <!-- NavSat (GPS) -->
+      <sensor name="navsat_sensor" type="navsat">
+        <gz_frame_id>base_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>30</update_rate>
+      </sensor>
+    </link>
+
+    <!-- ============================================================ -->
+    <!--  Blue Robotics T200 Thrusters (×4)                            -->
+    <!--  Specs at 12 V: ~36 N fwd, ~28 N rev, ~2500 RPM max          -->
+    <!--  Mass: 0.344 kg, OD: 100 mm, length: 113 mm                  -->
+    <!--  Mounted at rear corners, thrust along +X (forward)           -->
+    <!-- ============================================================ -->
+
+    <!-- T200 #0: starboard-bottom -->
+    <link name="rotor_0">
+      <pose>-0.26 -0.15 -0.15 0 1.5707963 0</pose>
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.344</mass>
+        <inertia>
+          <ixx>4.3e-04</ixx>  <ixy>0</ixy>  <ixz>0</ixz>
+          <iyy>5.8e-04</iyy>  <iyz>0</iyz>
+          <izz>5.8e-04</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_0_housing">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.113</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.7 0.15 0.15 1</ambient>
+          <diffuse>0.7 0.15 0.15 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <!-- Propeller guard ring -->
+      <visual name="rotor_0_guard">
+        <pose>0 0 0.06 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.048</radius>
+            <length>0.005</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <joint name="rotor_0_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_0</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+      </axis>
+    </joint>
+
+    <!-- T200 #1: port-bottom -->
+    <link name="rotor_1">
+      <pose>-0.26 0.15 -0.15 0 1.5707963 0</pose>
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.344</mass>
+        <inertia>
+          <ixx>4.3e-04</ixx>  <ixy>0</ixy>  <ixz>0</ixz>
+          <iyy>5.8e-04</iyy>  <iyz>0</iyz>
+          <izz>5.8e-04</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_1_housing">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.113</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.15 0.7 0.15 1</ambient>
+          <diffuse>0.15 0.7 0.15 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <visual name="rotor_1_guard">
+        <pose>0 0 0.06 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.048</radius>
+            <length>0.005</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <joint name="rotor_1_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_1</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+      </axis>
+    </joint>
+
+    <!-- T200 #2: port-top -->
+    <link name="rotor_2">
+      <pose>-0.26 0.15 0.15 0 1.5707963 0</pose>
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.344</mass>
+        <inertia>
+          <ixx>4.3e-04</ixx>  <ixy>0</ixy>  <ixz>0</ixz>
+          <iyy>5.8e-04</iyy>  <iyz>0</iyz>
+          <izz>5.8e-04</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_2_housing">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.113</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.7 1</ambient>
+          <diffuse>0.15 0.15 0.7 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <visual name="rotor_2_guard">
+        <pose>0 0 0.06 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.048</radius>
+            <length>0.005</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <joint name="rotor_2_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_2</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+      </axis>
+    </joint>
+
+    <!-- T200 #3: starboard-top -->
+    <link name="rotor_3">
+      <pose>-0.26 -0.15 0.15 0 1.5707963 0</pose>
+      <gravity>true</gravity>
+      <self_collide>false</self_collide>
+      <inertial>
+        <mass>0.344</mass>
+        <inertia>
+          <ixx>4.3e-04</ixx>  <ixy>0</ixy>  <ixz>0</ixz>
+          <iyy>5.8e-04</iyy>  <iyz>0</iyz>
+          <izz>5.8e-04</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_3_housing">
+        <geometry>
+          <cylinder>
+            <radius>0.05</radius>
+            <length>0.113</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.7 0.7 0.15 1</ambient>
+          <diffuse>0.7 0.7 0.15 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <visual name="rotor_3_guard">
+        <pose>0 0 0.06 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.048</radius>
+            <length>0.005</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.2 0.2 0.2 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <joint name="rotor_3_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_3</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><spring_reference>0</spring_reference><spring_stiffness>0</spring_stiffness></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ============================================================ -->
+    <!--  T200 motor model plugins                                     -->
+    <!--  At 12 V: max ~2500 RPM (≈262 rad/s), ~36 N fwd thrust       -->
+    <!--  motorConstant = 36 / 262² ≈ 5.25e-04                        -->
+    <!-- ============================================================ -->
+
+    <!-- ============================================================ -->
+    <!--  Hydrodynamics: Fossen's 6-DOF model for marine craft        -->
+    <!--  M·ẍ + D(ẋ)·ẋ + C(ẋ)·ẋ = F                                 -->
+    <!--                                                               -->
+    <!--  Vehicle: torpedo hull 0.432 m × 0.254 m Ø, 13 kg            -->
+    <!--  Seawater ρ = 1025 kg/m³                                      -->
+    <!--                                                               -->
+    <!--  Added mass — prolate spheroid Lamb k-factors (a/b ≈ 1.7):   -->
+    <!--    surge  k₁=0.26 → xDotU = -k₁·ρ·V ≈ -1.5                  -->
+    <!--    sway   k₂=0.66 → yDotV ≈ -15                              -->
+    <!--    heave  same as sway (axisymmetric)                         -->
+    <!--    pitch/yaw  ≈ -1.5 kg·m²                                   -->
+    <!--                                                               -->
+    <!--  Quadratic drag  F = -C · |v| · v                             -->
+    <!--    where C = 0.5·ρ·Cd·A                                       -->
+    <!--    surge:  Cd=0.15, A_front=0.0507 m² → 3.9                   -->
+    <!--    sway:   Cd=1.1,  A_side =0.155  m² → 87  (incl. T200s)    -->
+    <!--                                                               -->
+    <!--  Linear drag (viscous skin friction, low-speed regime)        -->
+    <!-- ============================================================ -->
+
+    <!-- Otter-style Thruster plugins (not MulticopterMotorModel). -->
+    <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+      <namespace>xudrone_0</namespace><joint_name>rotor_0_joint</joint_name>
+      <fluid_density>1000</fluid_density><propeller_diameter>0.076</propeller_diameter>
+      <thrust_coefficient>0.1</thrust_coefficient>
+      <min_thrust_cmd>-40</min_thrust_cmd><max_thrust_cmd>40</max_thrust_cmd>
+    </plugin>
+    <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+      <namespace>xudrone_0</namespace><joint_name>rotor_1_joint</joint_name>
+      <fluid_density>1000</fluid_density><propeller_diameter>0.076</propeller_diameter>
+      <thrust_coefficient>0.1</thrust_coefficient>
+      <min_thrust_cmd>-40</min_thrust_cmd><max_thrust_cmd>40</max_thrust_cmd>
+    </plugin>
+    <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+      <namespace>xudrone_0</namespace><joint_name>rotor_2_joint</joint_name>
+      <fluid_density>1000</fluid_density><propeller_diameter>0.076</propeller_diameter>
+      <thrust_coefficient>0.1</thrust_coefficient>
+      <min_thrust_cmd>-40</min_thrust_cmd><max_thrust_cmd>40</max_thrust_cmd>
+    </plugin>
+    <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+      <namespace>xudrone_0</namespace><joint_name>rotor_3_joint</joint_name>
+      <fluid_density>1000</fluid_density><propeller_diameter>0.076</propeller_diameter>
+      <thrust_coefficient>0.1</thrust_coefficient>
+      <min_thrust_cmd>-40</min_thrust_cmd><max_thrust_cmd>40</max_thrust_cmd>
+    </plugin>
+
+    <plugin filename="gz-sim-hydrodynamics-system"
+            name="gz::sim::systems::Hydrodynamics">
+      <link_name>base_link</link_name>
+      <!-- Drag-only; upstream added-mass exploded under graded buoyancy. -->
+      <xU>-1.5</xU><yV>-5.0</yV><zW>-5.0</zW>
+      <kP>-0.1</kP><mQ>-2.0</mQ><nR>-2.0</nR>
+      <xUabsU>-3.9</xUabsU><yVabsV>-40.0</yVabsV><zWabsW>-40.0</zWabsW>
+      <kPabsP>-0.05</kPabsP><mQabsQ>-5.0</mQabsQ><nRabsR>-5.0</nRabsR>
+    </plugin>
+
+    <!-- ============================================================ -->
+    <!--  VIO: Odometry publisher for external vision fusion           -->
+    <!-- ============================================================ -->
+    <plugin
+      filename="gz-sim-odometry-publisher-system"
+      name="gz::sim::systems::OdometryPublisher">
+      <dimensions>3</dimensions>
+    </plugin>
+
+  </model>
+</sdf>

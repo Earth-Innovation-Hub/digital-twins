@@ -1,0 +1,462 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="kiwanis_lake">
+    <static>true</static>
+    <!-- Kiwanis Lake Tempe. Polygon water/bed visuals; tiled-box bed collision
+         (ODE mesh collision segfaults); park hole visual + AABB land slabs.
+         Depth dish shore 1.0 m → center 2.44 m. ~12.67 acres. -->
+    <link name="link">
+      <visual name="water">
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/water.obj</uri></mesh></geometry>
+        <material>
+          <ambient>0.03 0.30 0.42 0.78</ambient>
+          <diffuse>0.03 0.30 0.42 0.78</diffuse>
+          <specular>0.15 0.25 0.30 1</specular>
+        </material>
+      </visual>
+      <visual name="bed">
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/bed.obj</uri></mesh></geometry>
+        <material>
+          <ambient>0.28 0.22 0.12 1</ambient>
+          <diffuse>0.28 0.22 0.12 1</diffuse>
+        </material>
+      </visual>
+      <visual name="park_fill">
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/park.obj</uri></mesh></geometry>
+        <material>
+          <ambient>0.25 0.38 0.18 1</ambient>
+          <diffuse>0.25 0.38 0.18 1</diffuse>
+        </material>
+      </visual>
+      <visual name="park_n_vis">
+        <pose>0.000 203.932 0.0 0 0 0</pose>
+        <geometry><box><size>440.00 32.14 0.02</size></box></geometry>
+        <material>
+          <ambient>0.25 0.38 0.18 1</ambient>
+          <diffuse>0.25 0.38 0.18 1</diffuse>
+        </material>
+      </visual>
+      <visual name="park_s_vis">
+        <pose>0.000 -219.376 0.0 0 0 0</pose>
+        <geometry><box><size>440.00 1.25 0.02</size></box></geometry>
+        <material>
+          <ambient>0.25 0.38 0.18 1</ambient>
+          <diffuse>0.25 0.38 0.18 1</diffuse>
+        </material>
+      </visual>
+      <visual name="park_e_vis">
+        <pose>214.820 -15.444 0.0 0 0 0</pose>
+        <geometry><box><size>10.36 406.62 0.02</size></box></geometry>
+        <material>
+          <ambient>0.25 0.38 0.18 1</ambient>
+          <diffuse>0.25 0.38 0.18 1</diffuse>
+        </material>
+      </visual>
+
+      <collision name="bed_tile_0">
+        <pose>-175.577 81.248 -1.2524 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_1">
+        <pose>-175.577 117.248 -1.3013 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_2">
+        <pose>-139.577 45.248 -1.8764 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_3">
+        <pose>-139.577 81.248 -2.3802 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_4">
+        <pose>-139.577 117.248 -2.1236 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_5">
+        <pose>-103.577 45.248 -1.6974 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_6">
+        <pose>-103.577 81.248 -2.4839 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_7">
+        <pose>-103.577 117.248 -1.7009 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_8">
+        <pose>-67.577 9.248 -1.8243 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_9">
+        <pose>-67.577 45.248 -1.9189 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_10">
+        <pose>-67.577 81.248 -1.1972 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_11">
+        <pose>-31.577 -26.752 -1.4922 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_12">
+        <pose>-31.577 9.248 -2.5884 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_13">
+        <pose>-31.577 45.248 -1.8011 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_14">
+        <pose>4.423 -62.752 -1.1532 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_15">
+        <pose>4.423 -26.752 -1.9230 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_16">
+        <pose>4.423 9.248 -2.5884 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_17">
+        <pose>4.423 45.248 -2.5354 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_18">
+        <pose>4.423 81.248 -2.0438 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_19">
+        <pose>40.423 -98.752 -1.5163 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_20">
+        <pose>40.423 -62.752 -2.2463 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_21">
+        <pose>40.423 -26.752 -2.5884 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_22">
+        <pose>40.423 9.248 -2.5884 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_23">
+        <pose>40.423 45.248 -2.3530 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_24">
+        <pose>40.423 81.248 -1.4087 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_25">
+        <pose>76.423 -134.752 -1.2704 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_26">
+        <pose>76.423 -98.752 -2.5166 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_27">
+        <pose>76.423 -62.752 -2.4211 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_28">
+        <pose>76.423 -26.752 -2.1504 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_29">
+        <pose>76.423 9.248 -1.8750 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_30">
+        <pose>76.423 45.248 -1.2092 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_31">
+        <pose>112.423 -170.752 -1.1625 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_32">
+        <pose>112.423 -134.752 -2.1751 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_33">
+        <pose>112.423 -98.752 -2.1090 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_34">
+        <pose>112.423 -62.752 -1.2041 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_35">
+        <pose>148.423 -170.752 -1.1961 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_36">
+        <pose>148.423 -134.752 -1.8531 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bed_tile_37">
+        <pose>148.423 -98.752 -1.2760 0 0 0</pose>
+        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
+        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
+          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
+      </collision>
+      <collision name="bank_0">
+        <pose>164.4666 -159.2111 -0.9692 0 0 1.058489</pose>
+        <geometry><box><size>54.5759 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_1">
+        <pose>177.1319 -122.7272 -0.9692 0 0 1.630798</pose>
+        <geometry><box><size>25.0862 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_2">
+        <pose>169.4750 -100.5675 -0.9692 0 0 2.196663</pose>
+        <geometry><box><size>23.3652 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_3">
+        <pose>156.3512 -90.9343 -0.9692 0 0 3.028651</pose>
+        <geometry><box><size>12.0369 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_4">
+        <pose>135.9395 -77.9096 -0.9692 0 0 2.465496</pose>
+        <geometry><box><size>37.6186 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_5">
+        <pose>116.3946 -56.6423 -0.9692 0 0 2.047506</pose>
+        <geometry><box><size>21.6130 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_6">
+        <pose>107.6621 -18.8917 -0.9692 0 0 1.704736</pose>
+        <geometry><box><size>57.0200 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_7">
+        <pose>78.3021 48.9479 -0.9692 0 0 2.144670</pose>
+        <geometry><box><size>93.9551 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_8">
+        <pose>44.9962 94.8020 -0.9692 0 0 2.455998</pose>
+        <geometry><box><size>19.9863 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_9">
+        <pose>34.9162 99.4612 -0.9692 0 0 -2.429742</pose>
+        <geometry><box><size>5.0896 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_10">
+        <pose>22.2800 105.7455 -0.9692 0 0 2.521814</pose>
+        <geometry><box><size>27.2984 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_11">
+        <pose>4.7335 114.3165 -0.9692 0 0 3.048861</pose>
+        <geometry><box><size>12.6087 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_12">
+        <pose>-7.6583 111.6318 -0.9692 0 0 -2.642740</pose>
+        <geometry><box><size>13.5037 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_13">
+        <pose>-21.3269 90.3520 -0.9692 0 0 -1.972290</pose>
+        <geometry><box><size>38.8738 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_14">
+        <pose>-35.9888 69.0105 -0.9692 0 0 -2.677507</pose>
+        <geometry><box><size>16.1474 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_15">
+        <pose>-49.1835 66.5709 -0.9692 0 0 2.958339</pose>
+        <geometry><box><size>12.5699 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_16">
+        <pose>-63.9491 92.1969 -0.9692 0 0 1.889554</pose>
+        <geometry><box><size>52.4462 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_17">
+        <pose>-74.5326 115.9786 -0.9692 0 0 -2.602105</pose>
+        <geometry><box><size>5.8444 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_18">
+        <pose>-79.9737 117.7103 -0.9692 0 0 2.363567</pose>
+        <geometry><box><size>9.3471 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_19">
+        <pose>-86.5201 131.1701 -0.9692 0 0 1.820391</pose>
+        <geometry><box><size>21.6535 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_20">
+        <pose>-104.4071 149.9708 -0.9692 0 0 2.672750</pose>
+        <geometry><box><size>35.1411 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_21">
+        <pose>-129.2750 155.9079 -0.9692 0 0 -2.919220</pose>
+        <geometry><box><size>18.4027 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_22">
+        <pose>-160.8629 138.7927 -0.9692 0 0 -2.552475</pose>
+        <geometry><box><size>54.1338 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_23">
+        <pose>-188.2498 115.9208 -0.9692 0 0 -2.125047</pose>
+        <geometry><box><size>18.1904 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_24">
+        <pose>-192.3922 100.2425 -0.9692 0 0 -1.481708</pose>
+        <geometry><box><size>15.5511 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_25">
+        <pose>-187.4998 82.9933 -0.9692 0 0 -1.152969</pose>
+        <geometry><box><size>20.5729 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_26">
+        <pose>-178.8247 72.6415 -0.9692 0 0 -0.326872</pose>
+        <geometry><box><size>8.6578 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_27">
+        <pose>-176.8790 68.0776 -0.9692 0 0 -2.099220</pose>
+        <geometry><box><size>7.0173 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_28">
+        <pose>-165.2180 42.5154 -0.9692 0 0 -1.026830</pose>
+        <geometry><box><size>51.8898 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_29">
+        <pose>-146.0412 18.1815 -0.9692 0 0 -0.343470</pose>
+        <geometry><box><size>11.8540 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_30">
+        <pose>-123.7469 21.1926 -0.9692 0 0 0.257066</pose>
+        <geometry><box><size>34.5073 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_31">
+        <pose>-83.2723 -4.4289 -0.9692 0 0 -0.888525</pose>
+        <geometry><box><size>75.9883 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_32">
+        <pose>-34.6318 -40.9642 -0.9692 0 0 -0.275773</pose>
+        <geometry><box><size>50.9643 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_33">
+        <pose>-5.6817 -52.4388 -0.9692 0 0 -0.790496</pose>
+        <geometry><box><size>13.0016 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_34">
+        <pose>16.5963 -92.2088 -0.9692 0 0 -1.103799</pose>
+        <geometry><box><size>78.9140 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_35">
+        <pose>56.2424 -136.8616 -0.9692 0 0 -0.403323</pose>
+        <geometry><box><size>47.2288 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_36">
+        <pose>88.2480 -157.6178 -0.9692 0 0 -0.838588</pose>
+        <geometry><box><size>31.1143 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_37">
+        <pose>101.1760 -167.6389 -0.9692 0 0 0.650539</pose>
+        <geometry><box><size>5.2511 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_38">
+        <pose>106.3454 -169.1033 -0.9692 0 0 -0.721086</pose>
+        <geometry><box><size>9.2971 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_39">
+        <pose>111.2621 -176.5093 -0.9692 0 0 -1.381083</pose>
+        <geometry><box><size>9.4544 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_40">
+        <pose>122.0331 -177.5513 -0.9692 0 0 0.374693</pose>
+        <geometry><box><size>21.6625 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_41">
+        <pose>136.1866 -175.2341 -0.9692 0 0 -0.364850</pose>
+        <geometry><box><size>9.2245 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_42">
+        <pose>143.2637 -182.5471 -0.9692 0 0 -1.202505</pose>
+        <geometry><box><size>13.0510 0.650 3.038</size></box></geometry>
+      </collision>
+      <collision name="bank_43">
+        <pose>148.2965 -186.0154 -0.9692 0 0 0.822037</pose>
+        <geometry><box><size>8.0755 0.650 3.038</size></box></geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
