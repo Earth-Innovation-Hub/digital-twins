@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.11">
+  <model name="heron">
+    <self_collide>false</self_collide>
+    <static>false</static>
+
+    <link name="base_link">
+      <inertial>
+        <!-- Jet hardware is included in this 28 kg hull mass. The separate
+             rotating links below are nearly massless simulation fixtures. -->
+        <pose>0 0 0.05 0 0 0</pose>
+        <mass>27.998</mass>
+        <inertia>
+          <ixx>2.48</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>4.49</iyy><iyz>0</iyz>
+          <izz>6.49</izz>
+        </inertia>
+        <!-- Clearpath heron_description (UUV-ICRA2025-Heron) uses no added mass. -->
+        <fluid_added_mass><xx>0</xx><yy>0</yy><zz>0</zz><pp>0</pp><qq>0</qq><rr>0</rr></fluid_added_mass>
+      </inertial>
+      <gravity>true</gravity>
+
+      <!-- Hidden displacement bodies. At 120 mm immersion they displace 28.0 litres:
+           2 hulls * 1.20 * 0.0972 * 0.12 = 0.02799 m^3.
+
+           Each hull is eight 0.15 m boxes, not one 1.20 m box. Gazebo's graded buoyancy
+           puts a partly submerged box's lift at the average of its wetted corners, which
+           does not move along the box when the box tilts. One long box therefore has no
+           waterplane restoring moment in pitch: only the 3 cm between the centre of
+           buoyancy and the centre of mass held the bow up (about 16 N m/rad), and full
+           thrust pitched the boat 20 degrees nose-down. With eight boxes the bow boxes
+           sink and the stern boxes rise, giving 270 N m/rad, within 2 % of the
+           continuous hull (rho g * 2 * b L^3 / 12 = 274). Roll comes from the two hulls
+           0.76 m apart, as before. -->
+      <collision name="port_displacement_0"><pose>-0.525 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_1"><pose>-0.375 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_2"><pose>-0.225 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_3"><pose>-0.075 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_4"><pose>0.075 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_5"><pose>0.225 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_6"><pose>0.375 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="port_displacement_7"><pose>0.525 0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_0"><pose>-0.525 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_1"><pose>-0.375 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_2"><pose>-0.225 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_3"><pose>-0.075 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_4"><pose>0.075 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_5"><pose>0.225 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_6"><pose>0.375 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+      <collision name="starboard_displacement_7"><pose>0.525 -0.38 0.14 0 0 0</pose><geometry><box><size>0.15 0.0972 0.24</size></box></geometry><surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface></collision>
+
+      <visual name="pontoon_port">
+        <pose>0 0.38 0.14 0 1.5707963 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>1.20</length></cylinder></geometry>
+        <material><ambient>0.85 0.65 0.1 1</ambient><diffuse>0.85 0.65 0.1 1</diffuse></material>
+      </visual>
+      <visual name="pontoon_starboard">
+        <pose>0 -0.38 0.14 0 1.5707963 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>1.20</length></cylinder></geometry>
+        <material><ambient>0.85 0.65 0.1 1</ambient><diffuse>0.85 0.65 0.1 1</diffuse></material>
+      </visual>
+      <visual name="deck">
+        <pose>0 0 0.28 0 0 0</pose>
+        <geometry><box><size>0.80 0.76 0.04</size></box></geometry>
+        <material><ambient>0.25 0.25 0.28 1</ambient><diffuse>0.25 0.25 0.28 1</diffuse></material>
+      </visual>
+      <visual name="bow">
+        <pose>0.55 0 0.30 0 0 0</pose>
+        <geometry><box><size>0.12 0.08 0.04</size></box></geometry>
+        <material><ambient>0.9 0.2 0.05 1</ambient><diffuse>0.9 0.2 0.05 1</diffuse></material>
+      </visual>
+
+      <visual name="camera_mast">
+        <pose>0 0 0.76 0 0 0</pose>
+        <geometry><cylinder><radius>0.02</radius><length>0.92</length></cylinder></geometry>
+        <material><ambient>0.3 0.3 0.3 1</ambient><diffuse>0.3 0.3 0.3 1</diffuse></material>
+      </visual>
+
+      <sensor name="imu_sensor" type="imu">
+        <always_on>1</always_on>
+        <update_rate>250</update_rate>
+        <gz_frame_id>base_link</gz_frame_id>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.00034</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.00034</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.00034</stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0</mean><stddev>0.004</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0</mean><stddev>0.004</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0</mean><stddev>0.004</stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+      <!-- No Gazebo magnetometer or barometer here; PX4 simulates both itself
+           (SENS_EN_MAGSIM, SENS_EN_BAROSIM in the 4023_gz_heron airframe).
+           - Gazebo's magnetometer takes the Earth field as north-east-down numbers but
+             turns it into the body with the east-north-up pose. PX4 then reads a heading
+             that is off by twice the declination (19 degrees at Tempe), and its bias
+             learning saved offsets of up to 0.2 gauss trying to explain the mirrored field.
+           - Both sensors were noiseless, so a boat at rest sent identical samples and PX4
+             dropped them as STALE; heading then ran on the gyro alone. -->
+      <sensor name="navsat_sensor" type="navsat">
+        <always_on>1</always_on>
+        <update_rate>30</update_rate>
+        <gz_frame_id>base_link</gz_frame_id>
+      </sensor>
+    </link>
+
+    <!-- Water jets are represented as low-mass propeller links. -->
+    <link name="port_jet">
+      <pose>-0.53 0.377654 0.08 0 0 0</pose>
+      <gravity>true</gravity>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia><ixx>0.0002</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.0002</iyy><iyz>0</iyz><izz>0.0002</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry><cylinder><radius>0.035</radius><length>0.06</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="port_jet_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>port_jet</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <link name="starboard_jet">
+      <pose>-0.53 -0.377654 0.08 0 0 0</pose>
+      <gravity>true</gravity>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia><ixx>0.0002</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.0002</iyy><iyz>0</iyz><izz>0.0002</izz></inertia>
+      </inertial>
+      <visual name="visual">
+        <geometry><cylinder><radius>0.035</radius><length>0.06</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="starboard_jet_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>starboard_jet</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <!-- Signed thrust clamped to +/-35 N per jet (UUV thruster thrustMin/Max); the adapter
+         keeps each jet inside Clearpath's -19.9..33.6 N. -->
+    <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+      <namespace>heron_0</namespace>
+      <joint_name>port_jet_joint</joint_name>
+      <fluid_density>1000</fluid_density>
+      <propeller_diameter>0.08</propeller_diameter>
+      <thrust_coefficient>0.1</thrust_coefficient>
+      <min_thrust_cmd>-35</min_thrust_cmd>
+      <max_thrust_cmd>35</max_thrust_cmd>
+    </plugin>
+    <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+      <namespace>heron_0</namespace>
+      <joint_name>starboard_jet_joint</joint_name>
+      <fluid_density>1000</fluid_density>
+      <propeller_diameter>0.08</propeller_diameter>
+      <thrust_coefficient>0.1</thrust_coefficient>
+      <min_thrust_cmd>-35</min_thrust_cmd>
+      <max_thrust_cmd>35</max_thrust_cmd>
+    </plugin>
+
+    <!-- Fossen 6-DOF damping from Clearpath heron_description gazebo.xacro, as used by
+         UUV-ICRA2025-Heron, with one change: quadratic sway drag (yVabsV).
+
+         Clearpath gives sway the same drag as surge (-2.76 against -2.94), so the hull
+         slid sideways as easily as it ran ahead: in a steady turn the measured sideways
+         speed equalled the forward speed (a 43 degree drift angle). Two hulls 1.2 m long
+         drawing 0.12 m present 0.29 m^2 to a sideways flow. As a bluff body
+         (Cd about 1.1, the lee hull partly shielded: Cd A about 0.24 m^2) that is
+         0.5 * 1000 * 0.24 = 120 N per (m/s)^2. This is an estimate from the hull's
+         shape, not a measurement of a Heron. The linear terms are Clearpath's. -->
+    <plugin filename="gz-sim-hydrodynamics-system"
+            name="gz::sim::systems::Hydrodynamics">
+      <link_name>base_link</link_name>
+      <xU>-16.44998712</xU>
+      <yV>-15.79776044</yV>
+      <zW>-100</zW>
+      <kP>-13</kP>
+      <mQ>-13</mQ>
+      <nR>-6</nR>
+      <xUabsU>-2.942</xUabsU>
+      <yVabsV>-120</yVabsV>
+      <zWabsW>-10</zWabsW>
+      <kPabsP>-5</kPabsP>
+      <mQabsQ>-5</mQabsQ>
+      <nRabsR>-5</nRabsR>
+    </plugin>
+      <include merge="true">
+      <uri>model://gimbal</uri>
+      <pose>0 0 1.30 0 0 3.14</pose>
+    </include>
+    <joint name="GimbalAttachJoint" type="fixed">
+      <parent>base_link</parent>
+      <child>cgo3_mount_link</child>
+    </joint>
+  </model>
+</sdf>

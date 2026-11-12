@@ -1,0 +1,106 @@
+#!/bin/sh
+#
+# @name Gazebo Heron ASV
+#
+# @type Rover
+# @class Rover
+#
+# Clearpath Heron on PX4's differential-rover controller: two jets 0.76 m apart, each
+# -19.9..33.6 N. The lake world is tempe_lake. Start PX4 with ROS_DOMAIN_ID=27 so uXRCE
+# matches this container.
+#
+# Hull numbers behind the gains (gz model "heron", measured in the twin 2026-11-11):
+#   surge   16.45 u + 2.94 u|u| N, 28 kg: 2.7 m/s flat out, time constant 1.0-1.7 s
+#   yaw     6 r + 5 r|r| N m, 6.5 kg m^2, 25.4 N m per unit of differential command
+#
+
+. ${R}etc/init.d/rc.rover_differential_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=tempe_lake}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=gz_heron}
+
+param set-default SIM_GZ_EN 1
+param set-default MAV_TYPE 11
+# Simulator time intentionally differs slightly from wall time. Preserve PX4
+# simulation timestamps instead of repeatedly resynchronizing them to the agent.
+param set-default UXRCE_DDS_SYNCT 0
+
+# --- Sensors -------------------------------------------------------------------------
+# Compass and barometer are PX4's own simulated sensors (true attitude and position plus
+# noise). The model has no Gazebo magnetometer or barometer: see the note in its
+# model.sdf (mirrored field, 19 degree heading error, STALE at rest).
+param set-default SENS_EN_MAGSIM 1
+param set-default SENS_EN_BAROSIM 1
+# The simulated sensors have no bias to learn. With the Gazebo compass the estimator
+# "learned" 0.2 gauss of compass offset, 0.2 m/s^2 of accelerometer bias and 0.7 deg/s
+# of gyro bias and saved them, which then turned the heading while the boat sat still.
+param set-default SENS_MAG_AUTOCAL 0
+param set-default SENS_IMU_AUTOCAL 0
+# (The online gyro calibration is stopped in 4023_gz_heron.post, for the same reason.)
+# The Gazebo GPS arrives without delay; PX4 assumes 110 ms unless told.
+param set-default EKF2_GPS_DELAY 10
+# Without bits 5 and 7, the "GPS drift while standing still" checks: a disarmed boat
+# coasts and drifts, and arming was refused for it ("GPS Horizontal Pos Drift too high").
+param set-default EKF2_GPS_CHECK 863
+
+# --- Guidance ------------------------------------------------------------------------
+# A leg ends inside this radius. Speed is brought down on the way in (RO_JERK_LIM,
+# RO_DECEL_LIM), so the boat stops about here instead of coasting through. That relies
+# on the twin's patch to rover_differential (stop at a goal with nothing after it);
+# stock PX4 carries cruise speed through any goal that has home roughly beyond it.
+param set-default NAV_ACC_RAD 1.0
+# Look 2 s ahead along the leg, never less than 3 m (four boat lengths at rest). Shorter
+# and the heading setpoint swings with every small cross-track error: 17-28 yaw-rate
+# reversals a minute at gain 1 / 2 m, none at these.
+param set-default PP_LOOKAHD_GAIN 2.0
+param set-default PP_LOOKAHD_MIN 3.0
+param set-default PP_LOOKAHD_MAX 10.0
+# With the goal more than 60 degrees off the bow, stop and turn on the spot (the jets can
+# do that), then drive once it is within 20 degrees. The hull's drag stops it in a
+# couple of seconds, so the "wait until stopped" step of the spot turn does end.
+param set-default RD_TRANS_DRV_TRN 1.05
+param set-default RD_TRANS_TRN_DRV 0.35
+
+# --- Speed ---------------------------------------------------------------------------
+# Cruise at the Heron's rated 1.7 m/s: that takes 54 % of the thrust and leaves the rest
+# for steering. RO_MAX_THR_SPEED is the speed the feed-forward assigns to full throttle;
+# 3.1 makes the straight line fit the hull's drag curve between 0.5 and 1.7 m/s.
+param set-default RO_MAX_THR_SPEED 3.1
+param set-default RO_SPEED_LIM 1.7
+param set-default RO_SPEED_P 0.4
+# A small integrator: the feed-forward already fits the drag curve, and a larger one
+# (0.3) wound up during acceleration and pushed the peak to 2.2 m/s.
+param set-default RO_SPEED_I 0.1
+param set-default RO_ACCEL_LIM 1.2
+# Approach: the speed setpoint falls with distance to the goal, about 1.7 m/s at 5 m,
+# 1.2 at 3 m, 0.45 at 1 m. Drag alone slows the hull at 1.3 m/s^2 from cruise.
+param set-default RO_DECEL_LIM 1.0
+param set-default RO_JERK_LIM 1.0
+
+# --- Yaw -----------------------------------------------------------------------------
+# RD_MAX_THR_YAW_R is, in this PX4 version, the wheel-speed difference (m/s) that the
+# feed-forward assigns to full differential command.
+param set-default RD_WHEEL_TRACK 0.76
+param set-default RD_MAX_THR_YAW_R 1.1
+param set-default RO_YAW_RATE_LIM 45
+param set-default RO_YAW_RATE_P 0.6
+param set-default RO_YAW_RATE_I 0.1
+param set-default RO_YAW_RATE_TH 1.0
+param set-default RO_YAW_P 1.5
+
+# --- Jets ----------------------------------------------------------------------------
+# Outputs are whole numbers offset by 100: 0..200 gives the thrust adapter 100 steps each
+# way (/usr/local/bin/heron_thrust_adapter divides by 100).
+param set-default SIM_GZ_WH_FUNC1 101
+param set-default SIM_GZ_WH_MIN1 0
+param set-default SIM_GZ_WH_MAX1 200
+param set-default SIM_GZ_WH_DIS1 100
+
+param set-default SIM_GZ_WH_FUNC2 102
+param set-default SIM_GZ_WH_MIN2 0
+param set-default SIM_GZ_WH_MAX2 200
+param set-default SIM_GZ_WH_DIS2 100
+
+# Bit 1 reverses the second wheel so positive throttle moves the bow forward.
+param set-default SIM_GZ_WH_REV 0

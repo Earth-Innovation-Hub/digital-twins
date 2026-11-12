@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <world name="tempe_lake">
+    <!-- Tempe Town Lake: 33.43222 N, 111.93194 W, surface elevation 350.52 m.
+         World Z=0 is the waterline. The lake is 3219 m by 366 m, east-west. -->
+    <physics type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic"/>
+    <scene>
+      <grid>false</grid>
+      <ambient>0.45 0.5 0.55 1</ambient>
+      <background>0.55 0.75 0.9 1</background>
+      <shadows>false</shadows>
+    </scene>
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>33.43222</latitude_deg>
+      <longitude_deg>-111.93194</longitude_deg>
+      <elevation>350.52</elevation>
+    </spherical_coordinates>
+
+    <!-- Declaring a world plugin disables PX4's server.config defaults, so the
+         standard simulation and sensor systems must be listed explicitly. -->
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-contact-system"
+            name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-air-pressure-system"
+            name="gz::sim::systems::AirPressure"/>
+    <plugin filename="gz-sim-navsat-system"
+            name="gz::sim::systems::NavSat"/>
+    <plugin filename="gz-sim-magnetometer-system"
+            name="gz::sim::systems::Magnetometer"/>
+    <plugin filename="gz-sim-apply-link-wrench-system"
+            name="gz::sim::systems::ApplyLinkWrench"/>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <!-- Water below Z=0 and air above it. Collision volumes determine displacement. -->
+    <plugin filename="gz-sim-buoyancy-system"
+            name="gz::sim::systems::Buoyancy">
+      <graded_buoyancy>
+        <default_density>1000</default_density>
+        <density_change>
+          <above_depth>0</above_depth>
+          <density>1.225</density>
+        </density_change>
+      </graded_buoyancy>
+    </plugin>
+
+    <!-- The old ground-contact plane was at the water surface. The lakebed is now 4 m down. -->
+    <model name="lakebed">
+      <static>true</static>
+      <pose>0 0 -4 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>4000 1600</size></plane></geometry>
+          <material>
+            <ambient>0.22 0.18 0.10 1</ambient>
+            <diffuse>0.22 0.18 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="water">
+      <static>true</static>
+      <pose>0 0 0.002 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>3219 366</size></plane></geometry>
+          <material>
+            <ambient>0.03 0.28 0.40 0.72</ambient>
+            <diffuse>0.03 0.28 0.40 0.72</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <light name="sun" type="directional">
+      <pose>0 0 500 0 0 0</pose>
+      <cast_shadows>false</cast_shadows>
+      <intensity>1</intensity>
+      <direction>-0.5 0.3 -0.8</direction>
+    </light>
+  </world>
+</sdf>

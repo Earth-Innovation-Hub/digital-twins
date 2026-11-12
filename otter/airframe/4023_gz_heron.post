@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# Heron ASV: runs after PX4's modules have started (rcS sources <airframe>.post).
+#
+# PX4's online gyro calibration runs whenever the vehicle is disarmed and decides "still"
+# from the gyro's variance alone. A disarmed boat that turns at a steady rate (drifting,
+# coasting, towed, moved in the Gazebo GUI) has a quiet gyro, so the turn rate was taken
+# for sensor offset: measured 0.86 rad/s "calibrated" away during a 49 deg/s turn. The
+# heading then froze during the turn, spun backwards for 10 s after it, and stayed up to
+# 160 degrees wrong until the boat had driven around for a minute. Smaller cases were
+# saved as CAL_GYRO0_ZOFF and turned the heading at rest on every later boot.
+# The simulated gyro has no offset to calibrate.
+gyro_calibration stop

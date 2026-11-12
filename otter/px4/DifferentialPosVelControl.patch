@@ -1,0 +1,31 @@
+--- /root/PX4-Autopilot/src/modules/rover_differential/DifferentialPosVelControl/DifferentialPosVelControl.cpp.orig	2025-03-15 03:30:05.000000000 +0000
++++ /root/PX4-Autopilot/src/modules/rover_differential/DifferentialPosVelControl/DifferentialPosVelControl.cpp	2026-11-11 22:58:06.151874377 +0000
+@@ -287,7 +287,12 @@
+ 	_pure_pursuit_status_pub.publish(pure_pursuit_status);
+ 	const float heading_error = matrix::wrap_pi(yaw_setpoint - _vehicle_yaw);
+ 
+-	if (!_mission_finished && distance_to_curr_wp > _param_nav_acc_rad.get()) {
++	// heron-twin: the finished flag belongs to Mission and Return
++	// only. In Hold (a go-to) the distance to the target decides.
++	const bool finished = _mission_finished && (_nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_MISSION
++			      || _nav_state == vehicle_status_s::NAVIGATION_STATE_AUTO_RTL);
++
++	if (!finished && distance_to_curr_wp > _param_nav_acc_rad.get()) {
+ 		if (_currentState == GuidanceState::STOPPED) {
+ 			_currentState = GuidanceState::DRIVING;
+ 		}
+@@ -353,6 +358,14 @@
+ 
+ 		_waypoint_transition_angle = RoverControl::calcWaypointTransitionAngle(_prev_wp_ned, _curr_wp_ned, _next_wp_ned);
+ 
++		// heron-twin: stop at a goal with nothing after it
++		// (a reposition target, the last mission item, home in RTL). Upstream puts home in
++		// for the missing next waypoint and then carries cruise speed through the goal
++		// whenever home lies roughly beyond it, or the angle is undefined.
++		if (!position_setpoint_triplet.next.valid || !PX4_ISFINITE(_waypoint_transition_angle)) {
++			_waypoint_transition_angle = 0.f;
++		}
++
+ 		// Waypoint cruising speed
+ 		_cruising_speed = position_setpoint_triplet.current.cruising_speed > 0.f ? math::constrain(
+ 					  position_setpoint_triplet.current.cruising_speed, 0.f, _param_ro_speed_limit.get()) : _param_ro_speed_limit.get();
