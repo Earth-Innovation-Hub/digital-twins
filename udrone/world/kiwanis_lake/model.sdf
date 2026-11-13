@@ -53,6 +53,16 @@
         </material>
       </visual>
 
+      <!-- West pier (satellite: dock from W bank into lake) -->
+      <visual name="west_pier">
+        <pose>-95.0 28.0 0.15 0 0 0.35</pose>
+        <geometry><box><size>18.0 2.4 0.30</size></box></geometry>
+        <material>
+          <ambient>0.55 0.50 0.42 1</ambient>
+          <diffuse>0.55 0.50 0.42 1</diffuse>
+        </material>
+      </visual>
+
       <collision name="bed_tile_0">
         <pose>-175.577 81.248 -1.2524 0 0 0</pose>
         <geometry><box><size>35.28 35.28 0.30</size></box></geometry>

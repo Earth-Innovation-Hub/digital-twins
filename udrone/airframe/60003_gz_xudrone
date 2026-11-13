@@ -5,10 +5,10 @@
 # @type Underwater Robot
 # @class Underwater Robot
 #
-# @output Motor1 T200 CCW, starboard-bottom
-# @output Motor2 T200 CCW, port-bottom
-# @output Motor3 T200 CW,  port-top
-# @output Motor4 T200 CW,  starboard-top
+# @output Motor1 T200 R2, port-top
+# @output Motor2 T200 R2, starboard-top
+# @output Motor3 T200 R2, starboard-bottom
+# @output Motor4 T200 R2, port-bottom
 #
 
 # Source UUV defaults (MAV_TYPE 12 submarine, EKF2 EV fusion, etc.)
@@ -52,48 +52,49 @@ param set-default FD_FAIL_P 0
 param set-default FD_FAIL_R 0
 
 # ------------------------------------------------------------------
-# 4× Blue Robotics T200 thrusters at rear corners
-# Hull: 17 in long × 10 in dia, 13 kg total
-# All thrust along +X (forward), positions relative to CG at origin
+# 4× Blue Robotics T200 R2 (BR-100545) — Hippocampus / udrone_boat
+# coplanar stern square on Blue Robotics 8" WTE (WTE8-ASM-R1).
+# Hull tube: ID 203.2 mm, L 298 mm, R_outer ~0.111 m.
+# All primary thrust +X; positions match model.sdf rotor_* links.
 # ------------------------------------------------------------------
 param set-default CA_ROTOR_COUNT 4
 param set-default CA_R_REV 255
 
-# T200 #0: starboard-bottom  (Y=-0.15, Z=-0.15)
+# T200 #0: port-top
 param set-default CA_ROTOR0_AX 1
 param set-default CA_ROTOR0_AY 0
 param set-default CA_ROTOR0_AZ 0
 param set-default CA_ROTOR0_KM 0
-param set-default CA_ROTOR0_PX -0.26
-param set-default CA_ROTOR0_PY -0.15
-param set-default CA_ROTOR0_PZ -0.15
+param set-default CA_ROTOR0_PX -0.20
+param set-default CA_ROTOR0_PY 0.14
+param set-default CA_ROTOR0_PZ 0.14
 
-# T200 #1: port-bottom  (Y=0.15, Z=-0.15)
+# T200 #1: starboard-top
 param set-default CA_ROTOR1_AX 1
 param set-default CA_ROTOR1_AY 0
 param set-default CA_ROTOR1_AZ 0
 param set-default CA_ROTOR1_KM 0
-param set-default CA_ROTOR1_PX -0.26
-param set-default CA_ROTOR1_PY 0.15
-param set-default CA_ROTOR1_PZ -0.15
+param set-default CA_ROTOR1_PX -0.20
+param set-default CA_ROTOR1_PY -0.14
+param set-default CA_ROTOR1_PZ 0.14
 
-# T200 #2: port-top  (Y=0.15, Z=0.15)
+# T200 #2: starboard-bottom
 param set-default CA_ROTOR2_AX 1
 param set-default CA_ROTOR2_AY 0
 param set-default CA_ROTOR2_AZ 0
 param set-default CA_ROTOR2_KM 0
-param set-default CA_ROTOR2_PX -0.26
-param set-default CA_ROTOR2_PY 0.15
-param set-default CA_ROTOR2_PZ 0.15
+param set-default CA_ROTOR2_PX -0.20
+param set-default CA_ROTOR2_PY -0.14
+param set-default CA_ROTOR2_PZ -0.14
 
-# T200 #3: starboard-top  (Y=-0.15, Z=0.15)
+# T200 #3: port-bottom
 param set-default CA_ROTOR3_AX 1
 param set-default CA_ROTOR3_AY 0
 param set-default CA_ROTOR3_AZ 0
 param set-default CA_ROTOR3_KM 0
-param set-default CA_ROTOR3_PX -0.26
-param set-default CA_ROTOR3_PY -0.15
-param set-default CA_ROTOR3_PZ 0.15
+param set-default CA_ROTOR3_PX -0.20
+param set-default CA_ROTOR3_PY 0.14
+param set-default CA_ROTOR3_PZ -0.14
 
 # Gazebo simulated ESC outputs
 param set-default SIM_GZ_EC_FUNC1 101
@@ -119,14 +120,24 @@ param set-default CA_ROTOR2_CT 1.0
 param set-default CA_ROTOR3_CT 1.0
 param set-default CA_METHOD 2
 param set-default CA_R_REV 255
-# Slight AY so the +X thruster matrix is not rank-deficient for yaw.
-param set-default CA_ROTOR0_AY -0.05
-param set-default CA_ROTOR1_AY 0.05
-param set-default CA_ROTOR2_AY 0.05
-param set-default CA_ROTOR3_AY -0.05
+# Slight AY for roll authority (pure +X gives τx=0); same-sign as PY.
+param set-default CA_ROTOR0_AY 0.05
+param set-default CA_ROTOR1_AY -0.05
+param set-default CA_ROTOR2_AY -0.05
+param set-default CA_ROTOR3_AY 0.05
 param set-default CA_ROTOR0_AX 0.9987
 param set-default CA_ROTOR1_AX 0.9987
 param set-default CA_ROTOR2_AX 0.9987
 param set-default CA_ROTOR3_AX 0.9987
 # Rates setpoints feed through as torque/thrust (body-rate / attitude offboard).
 param set-default UUV_SKIP_CTRL 1
+
+# No clock sync with the uXRCE agent (same as the Heron airframe 4023). The sim
+# clock runs slower than the wall clock when the host is loaded, and the sync
+# then resets every few seconds ("time jump detected"). Offboard publishers
+# send timestamp 0 and PX4 stamps the message on arrival.
+param set-default UXRCE_DDS_SYNCT 0
+
+# Do not write .ulg from boot (default SDLOG_MODE 1 fills the rootfs). Match
+# the other twins: log only when an operator starts a flight log.
+param set-default SDLOG_MODE 0

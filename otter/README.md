@@ -1,6 +1,10 @@
 # otter — Heron ASV on Tempe Town Lake
 
-Callsign **otter**, container `digital-twin-water-tempe-lake`, ROS domain 27, panel port 40099.
+Callsign **otter**, container `digital-twin-water-tempe-lake`, ROS domain 27, panel port **40099**.
+
+The aquatic *sandbox* (Kiwanis Lake, CoRAL boat **otter_k** + AUV **xudrone**) is a
+different container (`digital-twin-aquatic`, :40077) and lives in [`../udrone`](../udrone).
+Do not run this pack's `install.sh` against that sandbox.
 
 ## Layout
 

@@ -2,34 +2,52 @@
 
 PX4 Gazebo SITL vehicle packs for the Earth Innovation Hub / DREAMS Lab digital twins.
 
-| folder | callsign | vehicle | world |
-|---|---|---|---|
-| [`otter/`](otter/) | otter | Clearpath Heron ASV | Tempe Town Lake |
-| [`udrone/`](udrone/) | udrone | uDrone AUV (4 thrusters) | Kiwanis Lake (Tempe) |
-| [`badger/`](badger/) | badger | Aion R1 + forward camera | Bishop fault scarp (Locutus) |
-| [`kestrel/`](kestrel/) | kestrel | PX4 `x500_gimbal` (stock) | Bishop fault scarp (Locutus) |
+Each vehicle folder is what must be installed into a twin container so an image
+rebuild does not lose the lab's setup. Ops scripts that know private addressing
+(watchdogs, zenoh configs, pose tokens) stay in the private lab infra repo, not here.
 
-Each vehicle folder is what must be installed into a twin container so an image rebuild does not lose the lab's setup. Ops scripts that know private addressing (watchdogs, zenoh configs) stay in the private lab infra repo, not here.
+## Packs
 
-**Pinned PX4 for otter:** `v1.16.0-alpha2-441` (`9ac03f03eb`). The rover_differential guidance patch under `otter/px4/` applies to that tree.
+| folder | callsign(s) | vehicle | container | panel | ROS / Gazebo | world |
+|---|---|---|---|---|---|---|
+| [`otter/`](otter/) | **otter** | Clearpath Heron ASV | `digital-twin-water-tempe-lake` | :40099 | domain 27 | Tempe Town Lake |
+| [`udrone/`](udrone/) | **otter_k** + **xudrone** | Heron ASV + uDrone AUV (CoRAL pair) | `digital-twin-aquatic` | :40077 | domain 84 / `GZ_PARTITION=aquatic` | Kiwanis Lake |
+| [`badger/`](badger/) | **badger** | Aion R1 + forward camera | `digital-twin-locutus` | (with kestrel) | domain 53 | Bishop scarp |
+| [`kestrel/`](kestrel/) | **kestrel** | PX4 `x500_gimbal` (stock) | `digital-twin-locutus` | :40088 | domain 53 | Bishop scarp |
+| [`twin_builder/`](twin_builder/) | `ktwin-*` (on demand) | x500_gimbal session | `digital-twin-session-*` | (ephemeral) | (per session) | Cesium look-at patch |
 
-## Aquatic sandbox (dreamslab)
+**Pinned PX4 for otter / aquatic:** `v1.16.0-alpha2-441` (`9ac03f03eb`). The
+rover_differential guidance patch under `otter/px4/` applies to that tree.
 
-A second water-world container, `digital-twin-aquatic` (image of the same name, committed
-from the Tempe Heron twin), listens on host port **40077**. Isolation: `ROS_DOMAIN_ID=84`,
-`GZ_PARTITION=aquatic` (production otter on `:40099` untouched). Default world
-**`kiwanis_lake`**. Vehicles: otter (install pack) and **udrone** (`xudrone`, airframe
-60003). No zenoh or DeepGIS enrollment yet.
+## How the packs relate
+
+- **otter** is the production surface boat. Install only into `:40099`.
+- **udrone** is the aquatic *sandbox*. It installs a CoRAL two-robot mode into
+  `:40077` (boat callsign **otter_k**, AUV callsign **xudrone**) and never
+  touches the production otter. The Heron model/physics come from the same
+  lineage as `otter/`; the AUV, Kiwanis world, latch plugin, and tests live here.
+- **kestrel** + **badger** share Locutus (same two-robot PX4-instance pattern the
+  aquatic pack copies).
+- **twin_builder** is the AI Pilot on-demand twin worker; it never replaces
+  Locutus, otter, or aquatic.
+
+## Aquatic sandbox (quick start)
 
 ```bash
-# on dreamslab
-C=digital-twin-aquatic bash otter/install.sh
-C=digital-twin-aquatic bash udrone/install.sh
-# then:  vglrun /root/start_udrone.sh
+# on dreamslab, from a checkout of this repo
+C=digital-twin-aquatic bash udrone/install.sh   # sim must be stopped / disarmed
+docker exec digital-twin-aquatic simctl start    # otter_k + docked xudrone
+docker exec digital-twin-aquatic simctl status
+docker exec digital-twin-aquatic /root/udrone_boat/src/run_test.sh latch
+docker exec digital-twin-aquatic simctl stop
 ```
 
-**Related:**
+Full start/stop, demos, and design notes: [`udrone/README.md`](udrone/README.md).
+Production boat install/tests: [`otter/README.md`](otter/README.md).
+
+## Related
 
 - Twin image recipe (Locutus / kestrel): [`Open-UAV/openuav-turbovnc`](https://github.com/Open-UAV/openuav-turbovnc) `Dockerfile.twin` and `terrain/bishop_scarp/`
 - On-robot ROS (executors, relays): [`DREAMS-lab/dreams_llm_ros2`](https://github.com/DREAMS-lab/dreams_llm_ros2)
 - Globe / AI pilot: [`Earth-Innovation-Hub/deepgis-xr`](https://github.com/Earth-Innovation-Hub/deepgis-xr)
+- CoRAL concept (field): [`Earth-Innovation-Hub/coral`](https://github.com/Earth-Innovation-Hub/coral)

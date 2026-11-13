@@ -1,6 +1,8 @@
 # badger — Aion R1 with forward camera
 
-Callsign **badger**, shares container `digital-twin-locutus` with kestrel (PX4 instance 1), ROS domain 53.
+Callsign **badger**, shares container `digital-twin-locutus` with kestrel
+(PX4 instance 1; kestrel is instance 0 — same two-robot pattern as aquatic
+**otter_k** + **xudrone**), ROS domain 53.
 
 ## Layout
 

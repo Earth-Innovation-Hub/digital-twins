@@ -46,6 +46,32 @@
         </density_change>
       </graded_buoyancy>
     </plugin>
+    <!-- CoRAL latch: Open-UAV gazebo_ros_link_attacher semantics (gz-sim port).
+         Fixed joint heron_0::base_link <-> xudrone_1::base_link.
+         ATTACH/DETACH via /udrone_dock/command (String) or Empty on
+         /model/heron_0/udrone_dock/{attach,detach}.
+         Nest = xudrone pose in the boat frame while docked: centred between
+         the hulls (inner faces at y = +/-0.33) and under the deck (z = 0.26);
+         the AUV with its thrusters reaches +/-0.19 from its centre.
+         Re-attach is accepted within 0.6 m and 30 deg of the nest. -->
+    <plugin filename="gz-sim-link-attacher-system"
+            name="gz::sim::systems::LinkAttacher">
+      <parent_model>heron_0</parent_model>
+      <parent_link>base_link</parent_link>
+      <child_model>xudrone_1</child_model>
+      <child_link>base_link</child_link>
+      <command_topic>/udrone_dock/command</command_topic>
+      <attach_topic>/model/heron_0/udrone_dock/attach</attach_topic>
+      <detach_topic>/model/heron_0/udrone_dock/detach</detach_topic>
+      <state_topic>/model/heron_0/udrone_dock/state</state_topic>
+      <nest_pose>0 0 0 0 0 0</nest_pose>
+      <snap_to_nest>true</snap_to_nest>
+      <max_attach_distance>0.6</max_attach_distance>
+      <max_attach_angle>0.5236</max_attach_angle>
+      <auto_attach_on_start>true</auto_attach_on_start>
+      <require_proximity>true</require_proximity>
+      <state_period>1.0</state_period>
+    </plugin>
     <include>
       <uri>model://kiwanis_lake</uri>
       <name>kiwanis_lake</name>

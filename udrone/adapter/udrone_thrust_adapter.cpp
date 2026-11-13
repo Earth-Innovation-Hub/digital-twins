@@ -1,13 +1,27 @@
 // PX4 UUV motor commands -> uDrone T200 thrust (otter-style Thruster plugins).
-// Subscribes to /xudrone_0/command/motor_speed (SIM_GZ_EC).
+//
+//   in   /<model>/command/motor_speed                  gz.msgs.Actuators
+//        PX4's ESC output (SIM_GZ_EC). Note: no /model prefix. PX4 also
+//        advertises /model/<model>/command/motor_speed, but that is its wheel
+//        output (SIM_GZ_WH) and stays silent for this airframe.
+//   out  /model/<model>/joint/rotor_N_joint/cmd_thrust  gz.msgs.Double (N)
+//
+// Model name from UDRONE_GZ_MODEL (default xudrone_0; CoRAL dual uses xudrone_1).
 // SIM_GZ_EC publishes PWM-ish values (1100..1900); stopped/disarmed is 0.
+// One adapter per model: a second copy exits at once (lock in /tmp).
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <mutex>
+#include <string>
 #include <thread>
-#include <array>
 
 #include <gz/msgs/actuators.pb.h>
 #include <gz/msgs/double.pb.h>
@@ -23,16 +37,13 @@ double to_thrust(double raw) {
   if (!std::isfinite(raw)) {
     return 0.0;
   }
-  // Stopped / disarmed / NaN-mapped-zero from SIM_GZ
   if (std::abs(raw) < 1e-3) {
     return 0.0;
   }
-  // PWM center 1500, span 400 -> [-1,1] (SIM_GZ_EC)
   if (raw > 500.0) {
     const double u = std::clamp((raw - 1500.0) / 400.0, -1.0, 1.0);
     return u * kMaxN;
   }
-  // Already normalized [-1,1]
   if (raw >= -1.0 && raw <= 1.0) {
     return raw * kMaxN;
   }
@@ -42,18 +53,25 @@ double to_thrust(double raw) {
 
 int main() {
   using Clock = std::chrono::steady_clock;
+  const char *env_model = std::getenv("UDRONE_GZ_MODEL");
+  const std::string model = (env_model && env_model[0]) ? env_model : "xudrone_0";
+  const std::string prefix = "/model/" + model;
+
+  // Two adapters on one model would both drive the thrusters.
+  const std::string lock_path = "/tmp/udrone_thrust_adapter." + model + ".lock";
+  const int lock_fd = open(lock_path.c_str(), O_CREAT | O_RDWR, 0644);
+  if (lock_fd < 0 || flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+    std::cerr << "uDrone thrust adapter already running for " << model
+              << "; exiting" << std::endl;
+    return 0;
+  }
+
   gz::transport::Node node;
-  const char *joints[kN] = {
-      "/model/xudrone_0/joint/rotor_0_joint/cmd_thrust",
-      "/model/xudrone_0/joint/rotor_1_joint/cmd_thrust",
-      "/model/xudrone_0/joint/rotor_2_joint/cmd_thrust",
-      "/model/xudrone_0/joint/rotor_3_joint/cmd_thrust",
-  };
   std::array<gz::transport::Node::Publisher, kN> pubs = {
-      node.Advertise<gz::msgs::Double>(joints[0]),
-      node.Advertise<gz::msgs::Double>(joints[1]),
-      node.Advertise<gz::msgs::Double>(joints[2]),
-      node.Advertise<gz::msgs::Double>(joints[3]),
+      node.Advertise<gz::msgs::Double>(prefix + "/joint/rotor_0_joint/cmd_thrust"),
+      node.Advertise<gz::msgs::Double>(prefix + "/joint/rotor_1_joint/cmd_thrust"),
+      node.Advertise<gz::msgs::Double>(prefix + "/joint/rotor_2_joint/cmd_thrust"),
+      node.Advertise<gz::msgs::Double>(prefix + "/joint/rotor_3_joint/cmd_thrust"),
   };
 
   std::mutex lock;
@@ -66,11 +84,14 @@ int main() {
     for (int i = 0; i < kN; ++i) target[i] = to_thrust(msg.velocity(i));
     last = Clock::now();
   };
-  if (!node.Subscribe<gz::msgs::Actuators>("/xudrone_0/command/motor_speed", cb)) {
-    std::cerr << "failed to subscribe to /xudrone_0/command/motor_speed" << std::endl;
+  const std::string cmd_topic = "/" + model + "/command/motor_speed";
+  if (!node.Subscribe<gz::msgs::Actuators>(cmd_topic, cb)) {
+    std::cerr << "failed to subscribe to " << cmd_topic << std::endl;
     return 1;
   }
-  std::cout << "uDrone thrust adapter ready (T200 ±" << kMaxN << " N x4)" << std::endl;
+  std::cout << "uDrone thrust adapter ready on " << model << ": " << cmd_topic
+            << " -> " << prefix << "/joint/rotor_N_joint/cmd_thrust"
+            << " (T200 ±" << kMaxN << " N x4)" << std::endl;
 
   constexpr double dt = 0.01;
   const double alpha = dt / (kTimeConstant + dt);

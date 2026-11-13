@@ -1,9 +1,25 @@
 # Kiwanis Lake aquatic world
 
-- Origin: 33.374047 N, 111.939580 W (lake center); elev 335.28 m; ~12.7 acres (OSM 29210987)
-- Visuals: earcut water mesh; depth-dish bed (shore ~1 m → center 2.44 m); park mesh with lake hole
-- Collision: 38 tiled bed boxes (36 m, inside shoreline only) + 44 bank walls; park AABB slab visuals
-  (ODE triangle-mesh collision segfaults — not used)
-- No lawn plane under the water
-- uDrone displacement ~0.013 m³ (near-neutral)
-- Starts: uDrone 0,0,-1.0; surface craft 0,0,0.25; PX4_GZ_WORLD=kiwanis_lake
+Used by `digital-twin-aquatic` (`PX4_GZ_WORLD=kiwanis_lake`). Production otter
+on Tempe Town Lake is a different world and container.
+
+## Geography
+
+- Origin: **33.374047 N, 111.939580 W** (lake centre); elev ≈ 335.28 m; ~12.7 acres
+- Shoreline: OSM way `29210987` (`kiwanis_shore_enu.json`); checked against satellite —
+  NW lobe, NE peninsula pinch (~96 m), SE tip, NW cove; long-axis ~457 m ENU
+- Visuals: earcut water mesh; depth-dish bed (shore ~1 m → centre 2.44 m); park mesh
+  with lake hole; west pier stub
+- Collision: tiled bed boxes + bank walls; park AABB slab visuals (ODE triangle-mesh
+  collision is not used — it segfaults)
+
+## Vehicles in this world
+
+| callsign | model | spawn | notes |
+|---|---|---|---|
+| **otter_k** | `heron_0` | `0,0,0.25` | surface boat; DDS `/otter_k` |
+| **xudrone** (CoRAL) | `xudrone_1` | at the boat, then nest `0 0 0` boat-frame | docked under the catamaran |
+| **xudrone** (solo) | `xudrone_0` | `0,0,-1.0` | AUV only |
+
+uDrone mass 13.5 kg, displacement 0.01370 m³ → awash at z≈−0.11 with the hull top
+at the waterline. See [../README.md](../README.md) for start/stop and demos.

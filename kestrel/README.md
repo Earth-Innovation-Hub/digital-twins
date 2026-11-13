@@ -19,3 +19,9 @@ Lab-specific pieces live elsewhere:
 
 If a future change makes the airframe or model diverge from upstream, put the
 delta here the same way `../badger/` holds `r1_rover_cam`.
+
+## Site template (AI Pilot create_twin)
+
+`worlds/site_template/` is the Gazebo world shell filled by
+[`../twin_builder`](../twin_builder) for on-demand twins at a Cesium look-at.
+Session callsigns are `ktwin-*` and never replace Locutus.

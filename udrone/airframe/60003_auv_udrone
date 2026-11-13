@@ -5,66 +5,58 @@
 # @type Underwater Robot
 # @class Underwater Robot
 #
-# @output Motor1 T200 CCW, starboard-bottom
-# @output Motor2 T200 CCW, port-bottom
-# @output Motor3 T200 CW,  port-top
-# @output Motor4 T200 CW,  starboard-top
-#
-# @board px4_fmu-v2 exclude
-# @board bitcraze_crazyflie exclude
+# @output Motor1 T200 R2, port-top
+# @output Motor2 T200 R2, starboard-top
+# @output Motor3 T200 R2, starboard-bottom
+# @output Motor4 T200 R2, port-bottom
 #
 
-. ${R}etc/init.d/rc.uuv_defaults
+. ${R}/etc/init.d/rc.uuv_defaults
 
-# 12V 30Ah LiFePO4 battery (4S, 3.2 V/cell nominal)
+param set-default CA_AIRFRAME 7
+param set-default CA_METHOD 0
+param set-default MAV_TYPE 12
+
+param set-default COM_ARM_CHK_ESCS 0
+param set-default FD_ESCS_EN 0
+
 param set-default BAT1_N_CELLS 4
 param set-default BAT1_CAPACITY 30000
 param set-default BAT1_V_CHARGED 3.6
 param set-default BAT1_V_EMPTY 2.5
 
-# 4× Blue Robotics T200 thrusters at rear corners
-# Hull: 17 in long × 10 in dia, 13 kg total
-param set-default CA_AIRFRAME 7
+# 4× T200 R2 on Blue Robotics 8" WTE — coplanar stern (udrone_boat URDF)
 param set-default CA_ROTOR_COUNT 4
 param set-default CA_R_REV 255
 
-# T200 #0: starboard-bottom
 param set-default CA_ROTOR0_AX 1
 param set-default CA_ROTOR0_AY 0
 param set-default CA_ROTOR0_AZ 0
 param set-default CA_ROTOR0_KM 0
-param set-default CA_ROTOR0_PX -0.26
-param set-default CA_ROTOR0_PY -0.15
-param set-default CA_ROTOR0_PZ -0.15
+param set-default CA_ROTOR0_PX -0.20
+param set-default CA_ROTOR0_PY 0.1401
+param set-default CA_ROTOR0_PZ 0.1381
 
-# T200 #1: port-bottom
 param set-default CA_ROTOR1_AX 1
 param set-default CA_ROTOR1_AY 0
 param set-default CA_ROTOR1_AZ 0
 param set-default CA_ROTOR1_KM 0
-param set-default CA_ROTOR1_PX -0.26
-param set-default CA_ROTOR1_PY 0.15
-param set-default CA_ROTOR1_PZ -0.15
+param set-default CA_ROTOR1_PX -0.20
+param set-default CA_ROTOR1_PY -0.1401
+param set-default CA_ROTOR1_PZ 0.1381
 
-# T200 #2: port-top
 param set-default CA_ROTOR2_AX 1
 param set-default CA_ROTOR2_AY 0
 param set-default CA_ROTOR2_AZ 0
 param set-default CA_ROTOR2_KM 0
-param set-default CA_ROTOR2_PX -0.26
-param set-default CA_ROTOR2_PY 0.15
-param set-default CA_ROTOR2_PZ 0.15
+param set-default CA_ROTOR2_PX -0.20
+param set-default CA_ROTOR2_PY -0.1401
+param set-default CA_ROTOR2_PZ -0.1301
 
-# T200 #3: starboard-top
 param set-default CA_ROTOR3_AX 1
 param set-default CA_ROTOR3_AY 0
 param set-default CA_ROTOR3_AZ 0
 param set-default CA_ROTOR3_KM 0
-param set-default CA_ROTOR3_PX -0.26
-param set-default CA_ROTOR3_PY -0.15
-param set-default CA_ROTOR3_PZ 0.15
-
-param set-default PWM_MAIN_FUNC1 101
-param set-default PWM_MAIN_FUNC2 102
-param set-default PWM_MAIN_FUNC3 103
-param set-default PWM_MAIN_FUNC4 104
+param set-default CA_ROTOR3_PX -0.20
+param set-default CA_ROTOR3_PY 0.1401
+param set-default CA_ROTOR3_PZ -0.1301
