@@ -16,9 +16,18 @@
       </visual>
       <visual name="bed">
         <geometry><mesh><uri>model://kiwanis_lake/meshes/bed.obj</uri></mesh></geometry>
+        <!-- Planar ENU UVs, 8 m/tile; procedural silt/sand albedo. -->
         <material>
-          <ambient>0.28 0.22 0.12 1</ambient>
-          <diffuse>0.28 0.22 0.12 1</diffuse>
+          <ambient>0.35 0.28 0.18 1</ambient>
+          <diffuse>0.90 0.82 0.65 1</diffuse>
+          <specular>0.04 0.04 0.03 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>model://kiwanis_lake/materials/textures/bed_sand.png</albedo_map>
+              <roughness>0.92</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
         </material>
       </visual>
       <visual name="park_fill">

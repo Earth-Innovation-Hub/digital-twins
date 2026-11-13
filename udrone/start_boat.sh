@@ -19,6 +19,7 @@ mkdir -p /root/log
 # Helpers a previous boot may have left behind (stop_sim.sh reaps them too).
 pkill -f '^/usr/local/bin/udrone_thrust_adapter' 2>/dev/null || true
 pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/null || true
+pkill -f 'coral_behaviours|udrone_boat/behaviours/coral_behaviours' 2>/dev/null || true
 sleep 1
 
 # LinkAttacher system plugin (world SDF) needs to be on the plugin path.
@@ -44,6 +45,13 @@ setsid nohup env GZ_PARTITION=aquatic UDRONE_GZ_MODEL=xudrone_1 \
 (
   exec /root/start_udrone.sh --secondary
 ) >> /root/log/xudrone_secondary.log 2>&1 &
+
+# Behaviour library: /coral/command|event|status (dock, boat goto, helix).
+# Starts after a short delay so DDS / Gazebo are up; safe to retry if early.
+(
+  sleep 25
+  exec /usr/local/bin/coral_behaviours.sh
+) >> /root/log/coral_behaviours.log 2>&1 &
 
 cd /root/PX4-Autopilot/build/px4_sitl_default
 tail -f /dev/null | env \

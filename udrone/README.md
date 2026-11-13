@@ -30,6 +30,7 @@ Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airfra
 | `adapter/udrone_thrust_adapter.cpp` | `/usr/local/bin/udrone_thrust_adapter` | PX4 ESC → Gazebo thrust |
 | `plugin/LinkAttacher.*` | `…/gz-sim-8/plugins/` | dock latch |
 | `scripts/dock_command.py` | `/usr/local/bin/dock_command.py` | ATTACH / DETACH / STATE |
+| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / boat goto / helix library |
 | `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | Gazebo camera → `/xudrone/camera/*` |
 | `start_boat.sh` | `/root/start_boat.sh` | CoRAL pair (default `simctl start`) |
 | `start_udrone.sh` | `/root/start_udrone.sh` | `--secondary` (from boat) or solo |
@@ -110,6 +111,43 @@ Topics: `/udrone_dock/command` (`gz.msgs.StringMsg`),
 Gates on re-attach: **≤ 0.6 m** from the nest and **≤ 30°** relative yaw.
 `auto_attach_on_start` welds once after spawn. Exit status of ATTACH/DETACH is 1
 if the latch did not reach the requested state (e.g. out of range).
+
+## Behaviour library (`/coral`)
+
+Twin-side executor for typed commands (step 1 toward AI-pilot / mission_supervisor
+plumbing). Started automatically ~25 s after `simctl start` (log
+`/root/log/coral_behaviours.log`). Not the LLM — it only runs dock, boat goto,
+and helix and reports events.
+
+| topic | direction | payload |
+|---|---|---|
+| `/coral/command` | in | JSON `std_msgs/String` |
+| `/coral/event` | out | accepted / arrived / dock_done / helix_done / failed / rejected / aborted |
+| `/coral/status` | out | ~1 Hz: busy, phase, latch, boat/auv pose |
+
+Commands:
+
+```json
+{"type":"dock","action":"attach"|"detach","id"?}
+{"type":"goto","along_heading_m":8,"id"?}
+{"type":"goto","east_m":..,"north_m":..,"relative_to":"current"|"world"|"heading","id"?}
+{"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
+{"type":"hold"|"abort","id"?}
+```
+
+CLI (inside the container; waits for the terminal event):
+
+```bash
+docker exec digital-twin-aquatic coral_cmd.py status
+docker exec digital-twin-aquatic coral_cmd.py dock detach
+docker exec digital-twin-aquatic coral_cmd.py goto --along 8
+docker exec digital-twin-aquatic coral_cmd.py helix --duration 20 --radius 0.4
+docker exec digital-twin-aquatic coral_cmd.py dock attach
+```
+
+`goto --along N` matches the transit demo (forward along current yaw). Helix uses
+the same controller as the test, without the MAE pass gate. One command at a
+time (`busy` rejects overlaps); `abort` cancels.
 
 ## Demos and tests
 

@@ -12,7 +12,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 N=/tmp/udrone_new
 
 docker exec "$C" rm -rf $N
-docker exec "$C" mkdir -p $N/test
+docker exec "$C" mkdir -p $N/test $N/behaviours
 copy_in() {   # host file -> container path, without Windows line endings
   local tmp; tmp=$(mktemp)
   tr -d '\r' < "$1" > "$tmp"
@@ -39,6 +39,9 @@ copy_in "$HERE/model/heron/model.config"          $N/heron_model.config
 copy_in "$HERE/world/kiwanis_lake.sdf"            $N/kiwanis_lake.sdf
 for f in "$HERE"/test/*.py "$HERE"/test/*.sh; do
   if [ -f "$f" ]; then copy_in "$f" "$N/test/$(basename "$f")"; fi
+done
+for f in "$HERE"/behaviours/*; do
+  if [ -f "$f" ]; then copy_in "$f" "$N/behaviours/$(basename "$f")"; fi
 done
 if [ -f "$HERE/docs/KIWANIS.md" ]; then copy_in "$HERE/docs/KIWANIS.md" $N/KIWANIS.md; fi
 tar -C "$HERE/world" -cf - kiwanis_lake | docker exec -i "$C" tar -C $N -xf -

@@ -48,7 +48,8 @@ install)
   for f in $Mdir/model.sdf $Mdir/model.config $Hdir/model.sdf $Hdir/model.config $W $A1 \
            /root/udrone_thrust_adapter.cpp /usr/local/bin/udrone_thrust_adapter \
            /root/start_udrone.sh /root/start_boat.sh /root/stop_sim.sh \
-           /usr/local/bin/xudrone_camera_bridge.sh /usr/local/bin/dock_command.py; do
+           /usr/local/bin/xudrone_camera_bridge.sh /usr/local/bin/dock_command.py \
+           /usr/local/bin/coral_behaviours.sh /usr/local/bin/coral_cmd.py; do
     bk "$f"
   done
 
@@ -82,6 +83,10 @@ install)
   install -m 755 $N/xudrone_camera_bridge.sh /usr/local/bin/xudrone_camera_bridge.sh
   install -m 755 $N/dock_command.py /usr/local/bin/dock_command.py
   for f in $N/test/*; do install -m 755 "$f" /root/udrone_boat/src/; done
+  mkdir -p /root/udrone_boat/behaviours
+  for f in $N/behaviours/*; do install -m 755 "$f" /root/udrone_boat/behaviours/; done
+  install -m 755 $N/behaviours/run.sh /usr/local/bin/coral_behaviours.sh
+  install -m 755 $N/behaviours/cmd.sh /usr/local/bin/coral_cmd.py
   if [ -f $N/KIWANIS.md ]; then cp -a $N/KIWANIS.md /root/KIWANIS.md; fi
 
   # Superseded latch experiments.

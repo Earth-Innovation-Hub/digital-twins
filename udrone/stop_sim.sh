@@ -1,7 +1,8 @@
 #!/bin/bash
 # Stop the aquatic simulator: PX4 (every instance), Gazebo, the uXRCE agent,
-# both thrust adapters, the xudrone camera bridge and the launch scripts.
-# The noVNC desktop, px4_relay and the DeepGIS agents are left running.
+# both thrust adapters, the xudrone camera bridge, CoRAL behaviours and the
+# launch scripts. The noVNC desktop, px4_relay and the DeepGIS agents are left
+# running.
 #   stop_sim.sh --dry-run   list what would be stopped
 set +e
 dry=0
@@ -38,6 +39,9 @@ def kind(cmd):
         return "adapter"
     if "xudrone_camera_bridge" in cmd or "front_camera_link/sensor/front_camera" in cmd:
         return "bridge"
+    if "coral_behaviours" in cmd or "udrone_boat/behaviours/coral_behaviours" in cmd \
+            or "udrone_boat/behaviours/run_helix" in cmd:
+        return "behaviours"
     if "PX4_SIM_MODEL=" in cmd or (cmd.startswith("bash") and "bin/px4" in cmd):
         return "launcher"
     words = cmd.split()
@@ -76,7 +80,7 @@ for pid, tag, cmd in rows:
 
 # Launchers first: a launcher still waiting for the world would otherwise
 # spawn a vehicle after the simulator is gone.
-order = {"launcher": 0, "px4": 1, "gz": 2, "adapter": 3, "bridge": 3, "agent": 4, "tail": 5}
+order = {"launcher": 0, "behaviours": 1, "px4": 2, "gz": 3, "adapter": 4, "bridge": 4, "agent": 5, "tail": 6}
 kept.sort(key=lambda row: order[row[1]])
 
 if not kept:

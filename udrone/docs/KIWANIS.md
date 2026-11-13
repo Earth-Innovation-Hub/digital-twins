@@ -8,8 +8,10 @@ on Tempe Town Lake is a different world and container.
 - Origin: **33.374047 N, 111.939580 W** (lake centre); elev ≈ 335.28 m; ~12.7 acres
 - Shoreline: OSM way `29210987` (`kiwanis_shore_enu.json`); checked against satellite —
   NW lobe, NE peninsula pinch (~96 m), SE tip, NW cove; long-axis ~457 m ENU
-- Visuals: earcut water mesh; depth-dish bed (shore ~1 m → centre 2.44 m); park mesh
-  with lake hole; west pier stub
+- Visuals: earcut water mesh; depth-dish bed (shore ~1 m → centre 2.44 m) with a
+  tiled silt/sand albedo (`materials/textures/bed_sand.png`, planar UVs ~8 m/tile);
+  park mesh with lake hole; west pier stub. Regenerate texture/UVs with
+  `python3 mk_bed_texture.py` in this model folder.
 - Collision: tiled bed boxes + bank walls; park AABB slab visuals (ODE triangle-mesh
   collision is not used — it segfaults)
 
