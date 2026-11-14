@@ -5,7 +5,10 @@ Isolated from the production otter (`digital-twin-water-tempe-lake`, **:40099**)
 by `ROS_DOMAIN_ID=84` and `GZ_PARTITION=aquatic`.
 
 Two-robot mode follows the Locutus pattern (kestrel instance 0 + badger instance 1)
-and the [CoRAL](https://github.com/Earth-Innovation-Hub/coral) boat + docked AUV idea:
+and the [CoRAL](https://github.com/Earth-Innovation-Hub/CoRAL) boat + docked AUV idea:
+surface ASV carries an 8″ AUV, undocks for volume search / tag approach, and can
+re-latch under the catamaran. DeepGIS + dreams_llm drive the pair through
+`coral_bridge` (`instruction` → typed `/coral` behaviours).
 
 | vehicle | callsign | PX4 | Gazebo model | DDS namespace | role |
 |---|---|---|---|---|---|
@@ -17,6 +20,18 @@ Callsign is **`otter_k`** (underscore). A ROS 2 name cannot contain a hyphen, so
 
 Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airframe
 60003 — see [Start / stop](#start--stop).
+
+## Gazebo world (screenshots)
+
+Kiwanis Lake bed + shoreline in Gazebo Sim; entities `heron_0` (yellow ASV) and
+`xudrone_1` (AUV). White square on the bed is AprilTag 36h11 id 0 (~ENU 5 E, 4 N)
+used for survey stop and `approach_tag`.
+
+![Kiwanis Lake CoRAL twin in Gazebo](docs/img/kiwanis_gazebo.png)
+
+| otter_k nadir | xudrone front | xudrone nadir |
+|---|---|---|
+| ![otter_k down camera](docs/img/otter_k_nadir.png) | ![xudrone front camera](docs/img/xudrone_front.png) | ![xudrone down camera](docs/img/xudrone_nadir.png) |
 
 ## Layout
 
@@ -30,8 +45,9 @@ Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airfra
 | `adapter/udrone_thrust_adapter.cpp` | `/usr/local/bin/udrone_thrust_adapter` | PX4 ESC → Gazebo thrust |
 | `plugin/LinkAttacher.*` | `…/gz-sim-8/plugins/` | dock latch |
 | `scripts/dock_command.py` | `/usr/local/bin/dock_command.py` | ATTACH / DETACH / STATE |
-| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / boat goto / helix library |
-| `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | Gazebo camera → `/xudrone/camera/*` |
+| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / goto / survey / helix / coverage / approach_tag + tags |
+| `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | front camera → `/xudrone/camera/*` |
+| `*_down_camera_bridge.sh` | `/usr/local/bin/…` | nadir cameras → `/otter_k|xudrone/camera_down/*` |
 | `start_boat.sh` | `/root/start_boat.sh` | CoRAL pair (default `simctl start`) |
 | `start_udrone.sh` | `/root/start_udrone.sh` | `--secondary` (from boat) or solo |
 | `stop_sim.sh` | `/root/stop_sim.sh` | used by `simctl stop` |
@@ -114,16 +130,18 @@ if the latch did not reach the requested state (e.g. out of range).
 
 ## Behaviour library (`/coral`)
 
-Twin-side executor for typed commands (step 1 toward AI-pilot / mission_supervisor
-plumbing). Started automatically ~25 s after `simctl start` (log
-`/root/log/coral_behaviours.log`). Not the LLM — it only runs dock, boat goto,
-survey, helix, and coverage and reports events.
+Twin-side executor for typed commands. Started automatically ~25 s after
+`simctl start` (log `/root/log/coral_behaviours.log`). The LLM lives on
+tesseract (`coral_bridge` + `coral_instructions`); this node only runs behaviours
+and emits events.
 
 | topic | direction | payload |
 |---|---|---|
 | `/coral/command` | in | JSON `std_msgs/String` |
-| `/coral/event` | out | accepted / arrived / dock_done / helix_done / coverage_done / survey_done / failed / rejected / aborted |
+| `/coral/event` | out | accepted / arrived / dock_done / helix_done / coverage_done / approach_done / survey_done / failed / rejected / aborted |
 | `/coral/status` | out | ~1 Hz: busy, phase, latch, boat/auv pose |
+| `/coral/detections` | out | settled AprilTag ENU records |
+| `/coral/tracks` | out | ~2 Hz live ENU while a tag is in view (for `approach_tag`) |
 
 Commands:
 
@@ -133,9 +151,22 @@ Commands:
 {"type":"goto","east_m":..,"north_m":..,"relative_to":"current"|"world"|"heading","id"?}
 {"type":"survey","width_m":20,"length_m":20,"until"?: "tag_detected","id"?}
 {"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
-{"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "id"?}
+{"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "until"?: "tag_detected","id"?}
+{"type":"approach_tag","tag_id"?, "depth_m"?, "arrive_m"?, "speed_mps"?, "standoff_m"?, "center_east_m"?, "center_north_m"?, "id"?}
 {"type":"hold"|"abort","id"?}
 ```
+
+| behaviour | vehicle | notes |
+|---|---|---|
+| `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
+| `helix` | xudrone | forward helix (force → point-hull-axis) |
+| `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected` |
+| `approach_tag` | xudrone | PBVS to tag ENU / `/coral/tracks`; settle → `approach_done` (pre-cage dock) |
+| `dock` | latch | boat-nest ATTACH/DETACH (gates 0.6 m / 30°) — not bed-tag geometry |
+
+Perception: otter_k nadir → `/otter_k/detections`; xudrone **front** →
+`/xudrone/detections` (primary until-stop while pitched); xudrone nadir →
+`/xudrone/detections_down` + `tag_detector` ENU / tracks.
 
 CLI (inside the container; waits for the terminal event):
 
@@ -148,9 +179,9 @@ docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --
 docker exec digital-twin-aquatic coral_cmd.py dock attach
 ```
 
-`goto --along N` matches the transit demo (forward along current yaw). Helix and
-coverage share the same force→hull controller; coverage swaps `pos_des(t)` for a
-3D lawnmower. One command at a time (`busy` rejects overlaps); `abort` cancels.
+Example LLM-facing plan: *undock → short coverage until tag → approach the tag*
+→ `dock detach`, `coverage(until=tag_detected)`, `approach_tag`. One command at a
+time (`busy` rejects overlaps); `abort` cancels.
 
 ## Demos and tests
 

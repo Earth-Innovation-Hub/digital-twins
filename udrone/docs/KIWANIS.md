@@ -17,13 +17,12 @@ on Tempe Town Lake is a different world and container.
   down-camera can see the bed/tag; static bottom
   debris and surface floats clear of the `0,0` spawn. Regenerate textures/UVs
   with `python3 mk_bed_texture.py` in this model folder.
-- Sensors / perception (Tempe + Locutus pattern): otter_k and xudrone each have a
-  fixed nadir camera (`/otter_k/camera_down/*`, `/xudrone/camera_down/*`);
-  `apriltag_ros` + `tag_detector` on both → `/coral/detections` (xudrone TF
-  isolated on `/xudrone/tf`). Boat `survey` and AUV `coverage` can stop on
-  `until: tag_detected`; instruction plans may run `when: tag_detected` steps
-  (undock + coverage, or helix). Stepping stone for visual servoing / habitat
-  deploy-recover.
+- Sensors / perception: otter_k nadir (`/otter_k/camera_down/*`); xudrone front
+  (`/xudrone/camera/*`, primary until-stop while pitched) + nadir
+  (`/xudrone/camera_down/*`). `apriltag_ros` + `tag_detector` →
+  `/coral/detections` and `/coral/tracks`. Boat `survey` / AUV `coverage` can
+  stop on `until: tag_detected`; `approach_tag` swims closed-loop to the tag
+  ENU (PBVS). Screenshots: [img/](img/).
 - Collision: tiled bed boxes + bank walls; park AABB slab visuals (ODE triangle-mesh
   collision is not used — it segfaults)
 
