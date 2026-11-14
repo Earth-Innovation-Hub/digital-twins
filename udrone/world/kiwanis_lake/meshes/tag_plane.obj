@@ -1,9 +1,10 @@
-# AprilTag plane, 0.8 x 0.8 m, +Z up, UVs 0..1
+# AprilTag plane, 0.40 x 0.40 m, +Z up, UVs 0..1
+# Fits centered on each face of the 0.50 m tag cube.
 o tag_plane
-v -0.40 -0.40 0.00
-v  0.40 -0.40 0.00
-v  0.40  0.40 0.00
-v -0.40  0.40 0.00
+v -0.20 -0.20 0.00
+v  0.20 -0.20 0.00
+v  0.20  0.20 0.00
+v -0.20  0.20 0.00
 vt 0.0 0.0
 vt 1.0 0.0
 vt 1.0 1.0

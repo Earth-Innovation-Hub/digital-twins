@@ -20,6 +20,7 @@ mkdir -p /root/log
 pkill -f '^/usr/local/bin/udrone_thrust_adapter' 2>/dev/null || true
 pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/null || true
 pkill -f 'xudrone_down_camera_bridge|xudrone.*/down_camera' 2>/dev/null || true
+pkill -f 'xudrone_range_bridge|lidar_sensor_link|surface_range_link' 2>/dev/null || true
 pkill -f 'otter_k_down_camera_bridge|heron_0.*/down_camera' 2>/dev/null || true
 pkill -f 'apriltag_node|tag_detector|run_tags' 2>/dev/null || true
 pkill -f 'coral_behaviours|udrone_boat/behaviours/coral_behaviours' 2>/dev/null || true

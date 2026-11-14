@@ -22,8 +22,23 @@ param set-default SIM_GZ_EN 1
 
 # SITL simulated sensor enables
 param set-default SENS_EN_GPSSIM 1
+# Prefer Gazebo air_pressure_sensor → PX4 baro (GZBridge) for depth/height;
+# keep a soft sim baro only as backup (EKF handles multi-baro).
 param set-default SENS_EN_BAROSIM 1
 param set-default SENS_EN_MAGSIM 1
+
+# Downward EchoRanger (gpu_lidar on lidar_sensor_link) → distance_sensor via
+# GZBridge. Fuse as conditional range aid for height-above-bottom near the bed.
+param set-default EKF2_BARO_CTRL 1
+param set-default EKF2_HGT_REF 0
+param set-default EKF2_RNG_CTRL 1
+param set-default EKF2_RNG_A_HMAX 5.0
+param set-default EKF2_RNG_A_VMAX 1.5
+param set-default EKF2_RNG_NOISE 0.15
+param set-default EKF2_RNG_DELAY 5
+param set-default EKF2_RNG_POS_X 0.0
+param set-default EKF2_RNG_POS_Y 0.0
+param set-default EKF2_RNG_POS_Z 0.12
 
 # Cube 2.1-style: disable ESC checks (thrusters, not ESCs)
 param set-default COM_ARM_CHK_ESCS 0

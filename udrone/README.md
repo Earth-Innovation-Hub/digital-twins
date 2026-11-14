@@ -24,8 +24,9 @@ Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airfra
 ## Gazebo world (screenshots)
 
 Kiwanis Lake bed + shoreline in Gazebo Sim; entities `heron_0` (yellow ASV) and
-`xudrone_1` (AUV). White square on the bed is AprilTag 36h11 id 0 (~ENU 5 E, 4 N)
-used for survey stop and `approach_tag`.
+`xudrone_1` (AUV). A white **0.50 m cube** at ~ENU (5 E, 4 N, centre z≈−1.83)
+carries **AprilTag 36h11 id 0** (0.40 m) on **all six faces** so front, nadir, and
+side views can lock for survey stop and `approach_tag`.
 
 ![Kiwanis Lake CoRAL twin in Gazebo](docs/img/kiwanis_gazebo.png)
 
@@ -48,6 +49,7 @@ used for survey stop and `approach_tag`.
 | `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / goto / survey / helix / coverage / approach_tag + tags |
 | `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | front camera → `/xudrone/camera/*` |
 | `*_down_camera_bridge.sh` | `/usr/local/bin/…` | nadir cameras → `/otter_k|xudrone/camera_down/*` |
+| `xudrone_range_bridge.sh` | `/usr/local/bin/…` | EchoRanger + surface beam → `/xudrone/range/{bottom,surface}` |
 | `start_boat.sh` | `/root/start_boat.sh` | CoRAL pair (default `simctl start`) |
 | `start_udrone.sh` | `/root/start_udrone.sh` | `--secondary` (from boat) or solo |
 | `stop_sim.sh` | `/root/stop_sim.sh` | used by `simctl stop` |
@@ -141,7 +143,7 @@ and emits events.
 | `/coral/event` | out | accepted / arrived / dock_done / helix_done / coverage_done / approach_done / survey_done / failed / rejected / aborted |
 | `/coral/status` | out | ~1 Hz: busy, phase, latch, boat/auv pose |
 | `/coral/detections` | out | settled AprilTag ENU records |
-| `/coral/tracks` | out | ~2 Hz live ENU while a tag is in view (for `approach_tag`) |
+| `/coral/tracks` | out | ~2 Hz live ENU while a tag is in view (coverage / logging) |
 
 Commands:
 
@@ -152,7 +154,7 @@ Commands:
 {"type":"survey","width_m":20,"length_m":20,"until"?: "tag_detected","id"?}
 {"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
 {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "until"?: "tag_detected","id"?}
-{"type":"approach_tag","tag_id"?, "depth_m"?, "arrive_m"?, "speed_mps"?, "standoff_m"?, "center_east_m"?, "center_north_m"?, "id"?}
+{"type":"approach_tag","tag_id"?, "standoff_m"?, "tag_size_m"?, "settle_s"?, "timeout_s"?, "acquire_s"?, "search_budget_s"?, "search_r0_m"?, "search_r_max_m"?, "center_east_m"?, "center_north_m"?, "id"?}
 {"type":"hold"|"abort","id"?}
 ```
 
@@ -161,12 +163,20 @@ Commands:
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
 | `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected` |
-| `approach_tag` | xudrone | PBVS to tag ENU / `/coral/tracks`; settle → `approach_done` (pre-cage dock) |
+| `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
 | `dock` | latch | boat-nest ATTACH/DETACH (gates 0.6 m / 30°) — not bed-tag geometry |
+
+Default `tag_size_m` is **0.4** (matches the cube faces / `apriltag.yaml`).
 
 Perception: otter_k nadir → `/otter_k/detections`; xudrone **front** →
 `/xudrone/detections` (primary until-stop while pitched); xudrone nadir →
 `/xudrone/detections_down` + `tag_detector` ENU / tracks.
+
+**Range / depth (state estimation + awareness):** downward EchoRanger
+(`lidar_sensor_link`) feeds PX4 `distance_sensor` via GZBridge with
+`EKF2_RNG_CTRL=1` (baro remains `EKF2_HGT_REF`); GZ `air_pressure_sensor` → baro.
+ROS bridge publishes `/xudrone/range/bottom` and `/xudrone/range/surface` for
+`approach_tag` bed/surface clamps.
 
 CLI (inside the container; waits for the terminal event):
 
@@ -176,6 +186,7 @@ docker exec digital-twin-aquatic coral_cmd.py dock detach
 docker exec digital-twin-aquatic coral_cmd.py goto --along 8
 docker exec digital-twin-aquatic coral_cmd.py helix --duration 20 --radius 0.4
 docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --layers 3
+docker exec digital-twin-aquatic coral_cmd.py approach_tag --standoff 1.5 --east 5 --north 4 --world
 docker exec digital-twin-aquatic coral_cmd.py dock attach
 ```
 
@@ -227,6 +238,8 @@ Solo helix: stop the pair, start `start_udrone.sh`, then `run_test.sh helix`
 | `BOAT_LEG_M` | 8 | transit leg length |
 | `BOAT_ARRIVE_M` | 2.0 | arrival radius |
 | `UDRONE_GZ_MODEL` / `UDRONE_PX4_INSTANCE` | auto | override target AUV |
+| `UDRONE_APPROACH_TAG_SIZE` | 0.4 | IBVS / apriltag physical size (m) |
+| `UDRONE_IBVS_AGL_MIN` / `SURF_MIN` | 0.45 / 0.35 | approach bed / free-surface clearance (m) |
 
 Pass env through `docker exec`:
 

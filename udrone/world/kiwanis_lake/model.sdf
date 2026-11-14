@@ -76,20 +76,106 @@
         </material>
       </visual>
 
-      <!-- AprilTag 36h11 id 0 on the lake bed (Locutus-style albedo).
-           UV plane (boxes have no UVs). Closer to spawn for down-cam FOV;
-           raised above the silt dish so the bed mesh cannot bury it. -->
-      <visual name="tag_pad">
-        <pose>5.0 4.0 -2.10 0 0 0</pose>
-        <geometry><box><size>1.40 1.40 0.03</size></box></geometry>
+      <!-- AprilTag cube 0.50 m at ENU (5, 4): 36h11 id 0 on all six faces
+           (0.40 m UV planes) so front / nadir / any yaw can see a tag.
+           Centre sits 0.25 m above the bed dish (~z=-2.08). -->
+      <visual name="tag_cube">
+        <pose>5.0 4.0 -1.83 0 0 0</pose>
+        <geometry><box><size>0.50 0.50 0.50</size></box></geometry>
+        <material>
+          <ambient>0.95 0.95 0.95 1</ambient>
+          <diffuse>0.98 0.98 0.98 1</diffuse>
+          <emissive>0.12 0.12 0.12 1</emissive>
+        </material>
+      </visual>
+      <!-- Face normals = local +Z of tag_plane.obj; offset 1 mm proud of cube. -->
+      <visual name="apriltag_0_pz">
+        <pose>5.0 4.0 -1.579 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
           <ambient>1 1 1 1</ambient>
           <diffuse>1 1 1 1</diffuse>
-          <emissive>0.15 0.15 0.15 1</emissive>
+          <emissive>0.25 0.25 0.25 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/apriltag36h11_0.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
         </material>
       </visual>
-      <visual name="apriltag_0">
-        <pose>5.0 4.0 -2.08 0 0 0</pose>
+      <visual name="apriltag_0_nz">
+        <pose>5.0 4.0 -2.081 0 3.14159265359 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>0.25 0.25 0.25 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/apriltag36h11_0.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="apriltag_0_px">
+        <pose>5.251 4.0 -1.83 0 -1.57079632679 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>0.25 0.25 0.25 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/apriltag36h11_0.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="apriltag_0_nx">
+        <pose>4.749 4.0 -1.83 0 1.57079632679 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>0.25 0.25 0.25 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/apriltag36h11_0.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="apriltag_0_py">
+        <pose>5.0 4.251 -1.83 -1.57079632679 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>0.25 0.25 0.25 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/apriltag36h11_0.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="apriltag_0_ny">
+        <pose>5.0 3.749 -1.83 1.57079632679 0 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>

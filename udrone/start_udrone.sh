@@ -57,6 +57,17 @@ start_camera_bridge() {
       GZ_MODEL_NAME="$0" exec /usr/local/bin/xudrone_down_camera_bridge.sh
     ' "$1" >> /root/log/xudrone_down_camera.log 2>&1 < /dev/null &
   )
+  (
+    setsid bash -c '
+      for _ in $(seq 1 90); do
+        if gz topic -l 2>/dev/null | grep -q "$0.*lidar_sensor_link.*lidar/scan"; then
+          break
+        fi
+        sleep 1
+      done
+      GZ_MODEL_NAME="$0" exec /usr/local/bin/xudrone_range_bridge.sh
+    ' "$1" >> /root/log/xudrone_range_bridge.log 2>&1 < /dev/null &
+  )
 }
 
 boat_pose() {

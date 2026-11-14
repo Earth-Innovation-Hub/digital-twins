@@ -101,6 +101,7 @@ class CoralBehaviours(Node):
         self.latch = LatchState()
         self.boat_model = "heron_0"
         self.auv_model, self.auv_px4 = detect_target()
+        self._auv_miss_ticks = 0
 
         pub_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -167,6 +168,26 @@ class CoralBehaviours(Node):
         )
 
     # ---- messaging ------------------------------------------------------
+    def _refresh_auv_target(self, force: bool = False):
+        """Re-run detect_target after reset / late CoRAL spawn.
+
+        detect_target() honours UDRONE_GZ_MODEL; clear a stale pin so a solo
+        xudrone_0 guess made during bring-up can upgrade to xudrone_1.
+        """
+        if not force and self.auv_model.endswith("_1"):
+            return False
+        os.environ.pop("UDRONE_GZ_MODEL", None)
+        os.environ.pop("UDRONE_PX4_INSTANCE", None)
+        model, px4 = detect_target()
+        if model != self.auv_model or int(px4) != int(self.auv_px4):
+            self.get_logger().info(
+                f"auv target refresh: {self.auv_model}/px4={self.auv_px4} "
+                f"-> {model}/px4={px4}"
+            )
+            self.auv_model, self.auv_px4 = model, int(px4)
+            return True
+        return False
+
     def _emit(self, event: dict):
         event.setdefault("t_wall", time.time())
         self.last_event = event
@@ -175,6 +196,14 @@ class CoralBehaviours(Node):
 
     def _publish_status(self):
         fresh, sim_t, (boat, auv) = self.gz.read(self.boat_model, self.auv_model)
+        if auv is None:
+            self._auv_miss_ticks += 1
+            if self._auv_miss_ticks >= 3:
+                self._refresh_auv_target(force=True)
+                fresh, sim_t, (boat, auv) = self.gz.read(self.boat_model, self.auv_model)
+                self._auv_miss_ticks = 0
+        else:
+            self._auv_miss_ticks = 0
         boat_s = auv_s = None
         if boat is not None:
             (x, y, z), q = boat
@@ -270,6 +299,9 @@ class CoralBehaviours(Node):
         if kind == "abort":
             self._abort(cid, reason=cmd.get("reason") or "abort")
             return
+        if kind in ("reset", "reset_simulation", "sim_reset"):
+            self._start_reset(cmd)
+            return
         if self.busy and kind != "hold":
             self._emit({"type": "rejected", "id": cid, "reason": f"busy ({self.phase})",
                         "command": kind})
@@ -305,6 +337,39 @@ class CoralBehaviours(Node):
         was = self.phase
         self._clear_job()
         self._emit({"type": "aborted", "id": cid, "was": was, "reason": reason})
+
+    def _start_reset(self, cmd):
+        """Restart the aquatic twin (simctl restart). Allowed even while busy.
+
+        Spawns simctl in a new session so it outlives this node; emits reset_done
+        immediately after kicking off (the desktop comes back after ~1–2 min).
+        """
+        cid = cmd["id"]
+        reason = str(cmd.get("reason") or "reset")
+        was = self.phase
+        if self._helix_proc is not None and self._helix_proc.poll() is None:
+            try:
+                self._helix_proc.terminate()
+            except Exception:
+                pass
+        self._clear_job()
+        self._emit({"type": "accepted", "id": cid, "command": "reset",
+                    "reason": reason, "was": was})
+        simctl = os.environ.get("UDRONE_SIMCTL", "simctl")
+        try:
+            subprocess.Popen(
+                [simctl, "restart"],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._emit({"type": "reset_done", "id": cid, "failed": None,
+                        "message": "simctl restart started; desktop will return shortly",
+                        "reason": reason})
+        except Exception as ex:
+            self._emit({"type": "reset_done", "id": cid, "failed": str(ex),
+                        "reason": reason})
+            self._emit({"type": "failed", "id": cid, "reason": f"reset failed: {ex}"})
 
     def _hold(self, cid):
         if self.phase == "survey":
@@ -731,8 +796,11 @@ class CoralBehaviours(Node):
         self._spawn_auv("coverage", cmd["id"], runner, env, meta, "/tmp/coral_coverage.log")
 
     def _start_approach_tag(self, cmd):
+        # Front-cam IBVS → VehicleRatesSetpoint (pitch/yaw rates + thrust).
+        # standoff_m = desired optical range (m); ENU centre is optional/legacy.
+        self._refresh_auv_target(force=True)
         tag_id = int(float(cmd.get("tag_id", 0)))
-        standoff = float(cmd.get("standoff_m", os.environ.get("UDRONE_APPROACH_STANDOFF", "0")))
+        standoff = float(cmd.get("standoff_m", os.environ.get("UDRONE_APPROACH_STANDOFF", "1.5")))
         depth = float(cmd.get("depth_m", os.environ.get("UDRONE_APPROACH_DEPTH", "-1.2")))
         arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_APPROACH_ARRIVE", "0.5")))
         depth_tol = float(cmd.get("depth_tol_m", os.environ.get("UDRONE_APPROACH_DEPTH_TOL", "0.25")))
@@ -740,10 +808,21 @@ class CoralBehaviours(Node):
         settle = float(cmd.get("settle_s", os.environ.get("UDRONE_APPROACH_SETTLE", "3")))
         timeout = float(cmd.get("timeout_s", os.environ.get("UDRONE_APPROACH_TIMEOUT", "90")))
         acquire = float(cmd.get("acquire_s", os.environ.get("UDRONE_APPROACH_ACQUIRE", "25")))
-        if arrive <= 0 or speed <= 0 or timeout <= 0:
+        search_budget = float(cmd.get(
+            "search_budget_s",
+            os.environ.get("UDRONE_APPROACH_SEARCH_BUDGET", str(max(acquire, 45.0))),
+        ))
+        search_r0 = float(cmd.get(
+            "search_r0_m", os.environ.get("UDRONE_APPROACH_SEARCH_R0", "1.0")))
+        search_r_max = float(cmd.get(
+            "search_r_max_m", os.environ.get("UDRONE_APPROACH_SEARCH_RMAX", "8.0")))
+        tag_size = float(cmd.get("tag_size_m", os.environ.get("UDRONE_APPROACH_TAG_SIZE", "0.4")))
+        if timeout <= 0:
             self._emit({"type": "rejected", "id": cmd["id"],
-                        "reason": "approach_tag needs positive arrive_m/speed_mps/timeout_s"})
+                        "reason": "approach_tag needs positive timeout_s"})
             return
+        if standoff <= 0:
+            standoff = 1.5
         runner = os.environ.get(
             "UDRONE_APPROACH_RUNNER",
             "/root/udrone_boat/behaviours/run_approach_tag.py",
@@ -758,16 +837,15 @@ class CoralBehaviours(Node):
 
         ce = cmd.get("center_east_m", cmd.get("de", cmd.get("east_m")))
         cn = cmd.get("center_north_m", cmd.get("dn", cmd.get("north_m")))
-        # Seed from last AprilTag ENU when the command omits a centre.
+        # Optional ENU seed for attitude-rate search before the front cam locks.
         if (ce is None or cn is None) and isinstance(self.last_detection, dict):
             det = self.last_detection
             if det.get("e") is not None and det.get("n") is not None:
-                if det.get("source") != "apriltag_raw":
-                    ce = det.get("e") if ce is None else ce
-                    cn = det.get("n") if cn is None else cn
-                elif ce is None and cn is None:
-                    # Raw sighting only has vehicle pose — still a coarse seed.
-                    ce, cn = det.get("e"), det.get("n")
+                ce = det.get("e") if ce is None else ce
+                cn = det.get("n") if cn is None else cn
+        # Kiwanis bed tag default when nothing else is known.
+        if ce is None and cn is None:
+            ce, cn = 5.0, 4.0
 
         env = {
             **os.environ,
@@ -782,6 +860,14 @@ class CoralBehaviours(Node):
             "UDRONE_APPROACH_SETTLE": str(settle),
             "UDRONE_APPROACH_TIMEOUT": str(timeout),
             "UDRONE_APPROACH_ACQUIRE": str(acquire),
+            "UDRONE_APPROACH_SEARCH_BUDGET": str(search_budget),
+            "UDRONE_APPROACH_SEARCH_R0": str(search_r0),
+            "UDRONE_APPROACH_SEARCH_RMAX": str(search_r_max),
+            "UDRONE_APPROACH_TAG_SIZE": str(tag_size),
+            "UDRONE_APPROACH_DET_TOPIC": os.environ.get(
+                "UDRONE_APPROACH_DET_TOPIC", "/xudrone/detections"),
+            "UDRONE_APPROACH_INFO_TOPIC": os.environ.get(
+                "UDRONE_APPROACH_INFO_TOPIC", "/xudrone/camera/camera_info"),
             "UDRONE_GZ_MODEL": self.auv_model,
             "UDRONE_PX4_INSTANCE": str(self.auv_px4),
         }
@@ -791,7 +877,9 @@ class CoralBehaviours(Node):
         meta = {
             "tag_id": tag_id, "standoff_m": standoff, "depth_m": depth,
             "arrive_m": arrive, "depth_tol_m": depth_tol, "speed_mps": speed,
-            "settle_s": settle, "timeout_s": timeout,
+            "settle_s": settle, "timeout_s": timeout, "tag_size_m": tag_size,
+            "search_budget_s": search_budget, "search_r0_m": search_r0,
+            "search_r_max_m": search_r_max, "mode": "ibvs_rates_search",
         }
         if ce is not None and cn is not None:
             meta["center_east_m"] = float(ce)

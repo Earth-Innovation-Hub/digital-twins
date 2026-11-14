@@ -9,6 +9,7 @@ Examples:
   coral_cmd.py goto --east 1.5 --north 2.0 --world
   coral_cmd.py helix --duration 20 --radius 0.4
   coral_cmd.py coverage --width 12 --length 12 --layers 3
+  coral_cmd.py approach_tag --standoff 1.5 --timeout 60
   coral_cmd.py survey --width 20 --length 20 --until tag_detected
   coral_cmd.py abort
   coral_cmd.py status
@@ -29,8 +30,8 @@ CMD = "/coral/command"
 EVT = "/coral/event"
 STS = "/coral/status"
 TERMINAL = {
-    "arrived", "dock_done", "helix_done", "coverage_done", "survey_done",
-    "failed", "rejected", "aborted",
+    "arrived", "dock_done", "helix_done", "coverage_done", "approach_done",
+    "survey_done", "failed", "rejected", "aborted",
 }
 
 
@@ -65,7 +66,8 @@ def spin_for(node, seconds):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Send a CoRAL behaviour command")
     p.add_argument("type", choices=(
-        "dock", "goto", "helix", "coverage", "survey", "abort", "hold", "status",
+        "dock", "goto", "helix", "coverage", "approach_tag", "survey",
+        "abort", "hold", "status",
     ))
     p.add_argument("action", nargs="?", help="attach|detach for dock")
     p.add_argument("--east", type=float, default=0.0)
@@ -96,6 +98,24 @@ def main(argv=None):
                    help="survey/coverage lane heading degrees")
     p.add_argument("--until", default=None,
                    help="survey/coverage stop condition (tag_detected)")
+    p.add_argument("--standoff", type=float, default=None,
+                   help="approach_tag optical standoff_m")
+    p.add_argument("--tag-id", type=int, default=None, dest="tag_id",
+                   help="approach_tag AprilTag id")
+    p.add_argument("--tag-size", type=float, default=None, dest="tag_size",
+                   help="approach_tag physical size_m")
+    p.add_argument("--settle", type=float, default=None,
+                   help="approach_tag settle_s")
+    p.add_argument("--acquire", type=float, default=None,
+                   help="approach_tag acquire_s (legacy; prefer --search-budget)")
+    p.add_argument("--search-budget", type=float, default=None, dest="search_budget",
+                   help="approach_tag search_budget_s")
+    p.add_argument("--search-r0", type=float, default=None, dest="search_r0",
+                   help="approach_tag search_r0_m")
+    p.add_argument("--search-rmax", type=float, default=None, dest="search_r_max",
+                   help="approach_tag search_r_max_m")
+    p.add_argument("--depth", type=float, default=None,
+                   help="approach_tag depth_m (legacy/meta)")
     p.add_argument("--id", default=None)
     p.add_argument("--wait", type=float, default=180.0,
                    help="seconds to wait for a terminal event")
@@ -198,6 +218,34 @@ def main(argv=None):
         if args.world:
             cmd["center_east_m"] = args.east
             cmd["center_north_m"] = args.north
+    elif args.type == "approach_tag":
+        if args.tag_id is not None:
+            cmd["tag_id"] = args.tag_id
+        if args.standoff is not None:
+            cmd["standoff_m"] = args.standoff
+        if args.tag_size is not None:
+            cmd["tag_size_m"] = args.tag_size
+        if args.settle is not None:
+            cmd["settle_s"] = args.settle
+        if args.acquire is not None:
+            cmd["acquire_s"] = args.acquire
+        if args.search_budget is not None:
+            cmd["search_budget_s"] = args.search_budget
+        if args.search_r0 is not None:
+            cmd["search_r0_m"] = args.search_r0
+        if args.search_r_max is not None:
+            cmd["search_r_max_m"] = args.search_r_max
+        if args.depth is not None:
+            cmd["depth_m"] = args.depth
+        if args.timeout is not None:
+            cmd["timeout_s"] = args.timeout
+        if args.speed is not None:
+            cmd["speed_mps"] = args.speed
+        if args.arrive is not None:
+            cmd["arrive_m"] = args.arrive
+        if args.world or args.east or args.north:
+            cmd["center_east_m"] = args.east
+            cmd["center_north_m"] = args.north
 
     print(f"SEND {json.dumps(cmd)}", flush=True)
     spin_for(node, 0.3)
@@ -231,7 +279,9 @@ def main(argv=None):
     ok = True
     if terminal.get("type") in ("failed", "rejected"):
         ok = False
-    if terminal.get("type") in ("helix_done", "coverage_done") and terminal.get("failed"):
+    if terminal.get("type") in ("helix_done", "coverage_done", "approach_done") and terminal.get("failed"):
+        ok = False
+    if terminal.get("type") == "approach_done" and not terminal.get("arrived", True):
         ok = False
     node.destroy_node()
     rclpy.shutdown()

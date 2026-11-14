@@ -82,6 +82,7 @@ install)
   install -m 755 $N/stop_sim.sh /root/stop_sim.sh
   install -m 755 $N/xudrone_camera_bridge.sh /usr/local/bin/xudrone_camera_bridge.sh
   install -m 755 $N/xudrone_down_camera_bridge.sh /usr/local/bin/xudrone_down_camera_bridge.sh
+  install -m 755 $N/xudrone_range_bridge.sh /usr/local/bin/xudrone_range_bridge.sh
   install -m 755 $N/otter_k_down_camera_bridge.sh /usr/local/bin/otter_k_down_camera_bridge.sh
   install -m 755 $N/dock_command.py /usr/local/bin/dock_command.py
   for f in $N/test/*; do install -m 755 "$f" /root/udrone_boat/src/; done

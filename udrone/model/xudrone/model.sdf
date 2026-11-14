@@ -291,6 +291,130 @@
     </joint>
 
     <!-- ============================================================ -->
+    <!--  EchoRanger (down): single-beam gpu_lidar → PX4 distance_sensor -->
+    <!--  GZBridge hard-codes: .../link/lidar_sensor_link/sensor/lidar/scan -->
+    <!--  Orientation must match ROTATION_DOWNWARD_FACING (q≈0,1,0,0).     -->
+    <!-- ============================================================ -->
+    <link name="echoranger_visual_link">
+      <pose>0.0 0 -0.115 0 0 0</pose>
+      <inertial>
+        <mass>0.02</mass>
+        <inertia>
+          <ixx>1e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-05</iyy><iyz>0</iyz>
+          <izz>1e-05</izz>
+        </inertia>
+      </inertial>
+      <visual name="echoranger_housing">
+        <geometry><cylinder><radius>0.018</radius><length>0.028</length></cylinder></geometry>
+        <material>
+          <ambient>0.15 0.45 0.55 1</ambient>
+          <diffuse>0.2 0.55 0.65 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <joint name="echoranger_visual_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>echoranger_visual_link</child>
+    </joint>
+
+    <link name="lidar_sensor_link">
+      <!-- Match x500_lidar_down: pitch +90 then sensor roll 180 → world down. -->
+      <pose>0.0 0 -0.12 0 1.57079632679 0</pose>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-05</iyy><iyz>0</iyz>
+          <izz>1e-05</izz>
+        </inertia>
+      </inertial>
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0 0 0 3.14159265359 0 0</pose>
+        <update_rate>20</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.12</min>
+            <max>30.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <always_on>1</always_on>
+        <visualize>true</visualize>
+      </sensor>
+    </link>
+    <joint name="lidar_sensor_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>lidar_sensor_link</child>
+    </joint>
+
+    <!-- Upward single-beam ranger for free-surface clearance (ROS only; PX4
+         GZBridge only auto-binds lidar_sensor_link). -->
+    <link name="surface_range_link">
+      <pose>0.0 0 0.12 0 -1.57079632679 0</pose>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia>
+          <ixx>1e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-05</iyy><iyz>0</iyz>
+          <izz>1e-05</izz>
+        </inertia>
+      </inertial>
+      <visual name="surface_ranger_housing">
+        <geometry><cylinder><radius>0.014</radius><length>0.02</length></cylinder></geometry>
+        <material>
+          <ambient>0.45 0.35 0.15 1</ambient>
+          <diffuse>0.55 0.45 0.2 1</diffuse>
+        </material>
+      </visual>
+      <sensor name="surface_lidar" type="gpu_lidar">
+        <pose>0 0 0 3.14159265359 0 0</pose>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.12</min>
+            <max>15.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <always_on>1</always_on>
+        <visualize>false</visualize>
+      </sensor>
+    </link>
+    <joint name="surface_range_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>surface_range_link</child>
+    </joint>
+
+    <!-- ============================================================ -->
     <!--  Prop links: otter-style — NO link RPY, joint axis = body +X. -->
     <!--  Disk visual pitched in the *visual* only (does not affect joint). -->
     <!--  #0 port-top, #1 stbd-top, #2 stbd-bot, #3 port-bot                -->
