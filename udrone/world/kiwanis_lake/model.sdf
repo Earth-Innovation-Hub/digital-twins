@@ -7,11 +7,15 @@
          Depth dish shore 1.0 m → center 2.44 m. ~12.67 acres. -->
     <link name="link">
       <visual name="water">
+        <!-- Classic material (no PBR): ogre2 PBR often ignores transparency and
+             hides the bed / tag from the down-camera. -->
+        <transparency>0.72</transparency>
+        <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/water.obj</uri></mesh></geometry>
         <material>
-          <ambient>0.03 0.30 0.42 0.78</ambient>
-          <diffuse>0.03 0.30 0.42 0.78</diffuse>
-          <specular>0.15 0.25 0.30 1</specular>
+          <ambient>0.02 0.12 0.18 0.35</ambient>
+          <diffuse>0.03 0.18 0.26 0.35</diffuse>
+          <specular>0.25 0.35 0.40 1</specular>
         </material>
       </visual>
       <visual name="bed">
@@ -69,6 +73,170 @@
         <material>
           <ambient>0.55 0.50 0.42 1</ambient>
           <diffuse>0.55 0.50 0.42 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- AprilTag 36h11 id 0 on the lake bed (Locutus-style albedo).
+           UV plane (boxes have no UVs). Closer to spawn for down-cam FOV;
+           raised above the silt dish so the bed mesh cannot bury it. -->
+      <visual name="tag_pad">
+        <pose>5.0 4.0 -2.10 0 0 0</pose>
+        <geometry><box><size>1.40 1.40 0.03</size></box></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>0.15 0.15 0.15 1</emissive>
+        </material>
+      </visual>
+      <visual name="apriltag_0">
+        <pose>5.0 4.0 -2.08 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>0.25 0.25 0.25 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>materials/textures/apriltag36h11_0.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+
+      <!-- ---- Lake props (visual; keep clear of spawn 0,0) ---- -->
+      <!-- Bottom: rocks / debris on the depth dish -->
+      <visual name="rock_a">
+        <pose>-42.0 38.0 -2.05 0.2 0.1 0.4</pose>
+        <geometry><sphere><radius>0.55</radius></sphere></geometry>
+        <material>
+          <ambient>0.32 0.30 0.28 1</ambient>
+          <diffuse>0.42 0.40 0.36 1</diffuse>
+        </material>
+      </visual>
+      <visual name="rock_b">
+        <pose>-40.5 36.5 -2.10 0.1 -0.2 1.1</pose>
+        <geometry><sphere><radius>0.35</radius></sphere></geometry>
+        <material>
+          <ambient>0.28 0.27 0.25 1</ambient>
+          <diffuse>0.38 0.36 0.32 1</diffuse>
+        </material>
+      </visual>
+      <visual name="rock_c">
+        <pose>32.0 52.0 -2.15 0.3 0.15 -0.5</pose>
+        <geometry><box><size>1.40 0.95 0.70</size></box></geometry>
+        <material>
+          <ambient>0.30 0.28 0.26 1</ambient>
+          <diffuse>0.40 0.37 0.33 1</diffuse>
+        </material>
+      </visual>
+      <visual name="sunken_crate">
+        <pose>-28.0 -42.0 -2.20 0.05 0.08 0.6</pose>
+        <geometry><box><size>1.20 0.80 0.70</size></box></geometry>
+        <material>
+          <ambient>0.35 0.22 0.12 1</ambient>
+          <diffuse>0.48 0.30 0.16 1</diffuse>
+        </material>
+      </visual>
+      <visual name="sunken_tire">
+        <pose>-58.0 12.0 -2.00 1.5708 0 0.3</pose>
+        <geometry><cylinder><radius>0.40</radius><length>0.22</length></cylinder></geometry>
+        <material>
+          <ambient>0.08 0.08 0.08 1</ambient>
+          <diffuse>0.12 0.12 0.12 1</diffuse>
+        </material>
+      </visual>
+      <visual name="sunken_pipe">
+        <pose>48.0 -28.0 -2.05 0 1.2 0.4</pose>
+        <geometry><cylinder><radius>0.18</radius><length>3.2</length></cylinder></geometry>
+        <material>
+          <ambient>0.25 0.32 0.28 1</ambient>
+          <diffuse>0.35 0.45 0.38 1</diffuse>
+        </material>
+      </visual>
+      <visual name="bed_boulder">
+        <pose>18.0 -48.0 -2.18 -0.15 0.2 0.9</pose>
+        <geometry><sphere><radius>0.85</radius></sphere></geometry>
+        <material>
+          <ambient>0.34 0.32 0.29 1</ambient>
+          <diffuse>0.45 0.42 0.38 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Surface: buoys / floats / pads (visual only; no physics bob) -->
+      <visual name="buoy_orange_a">
+        <pose>22.0 16.0 0.18 0 0 0</pose>
+        <geometry><sphere><radius>0.28</radius></sphere></geometry>
+        <material>
+          <ambient>0.85 0.35 0.05 1</ambient>
+          <diffuse>1.0 0.45 0.08 1</diffuse>
+          <specular>0.4 0.3 0.2 1</specular>
+        </material>
+      </visual>
+      <visual name="buoy_stem_a">
+        <pose>22.0 16.0 0.48 0 0 0</pose>
+        <geometry><cylinder><radius>0.04</radius><length>0.35</length></cylinder></geometry>
+        <material>
+          <ambient>0.7 0.7 0.7 1</ambient>
+          <diffuse>0.85 0.85 0.85 1</diffuse>
+        </material>
+      </visual>
+      <visual name="buoy_orange_b">
+        <pose>-32.0 44.0 0.18 0 0 0.5</pose>
+        <geometry><sphere><radius>0.26</radius></sphere></geometry>
+        <material>
+          <ambient>0.85 0.35 0.05 1</ambient>
+          <diffuse>1.0 0.45 0.08 1</diffuse>
+        </material>
+      </visual>
+      <visual name="buoy_yellow">
+        <pose>-12.0 -58.0 0.16 0 0 -0.3</pose>
+        <geometry><sphere><radius>0.24</radius></sphere></geometry>
+        <material>
+          <ambient>0.75 0.65 0.10 1</ambient>
+          <diffuse>0.95 0.85 0.15 1</diffuse>
+        </material>
+      </visual>
+      <visual name="float_plank">
+        <pose>52.0 22.0 0.06 0 0 0.7</pose>
+        <geometry><box><size>2.40 0.35 0.08</size></box></geometry>
+        <material>
+          <ambient>0.45 0.32 0.18 1</ambient>
+          <diffuse>0.62 0.45 0.25 1</diffuse>
+        </material>
+      </visual>
+      <visual name="float_cooler">
+        <pose>-62.0 55.0 0.12 0 0 -0.4</pose>
+        <geometry><box><size>0.70 0.45 0.35</size></box></geometry>
+        <material>
+          <ambient>0.10 0.25 0.55 1</ambient>
+          <diffuse>0.15 0.40 0.80 1</diffuse>
+        </material>
+      </visual>
+      <visual name="lily_a">
+        <pose>8.0 -22.0 0.03 0 0 0.2</pose>
+        <geometry><cylinder><radius>0.55</radius><length>0.02</length></cylinder></geometry>
+        <material>
+          <ambient>0.12 0.38 0.14 1</ambient>
+          <diffuse>0.18 0.52 0.20 1</diffuse>
+        </material>
+      </visual>
+      <visual name="lily_b">
+        <pose>10.5 -20.0 0.03 0 0 1.1</pose>
+        <geometry><cylinder><radius>0.40</radius><length>0.02</length></cylinder></geometry>
+        <material>
+          <ambient>0.10 0.35 0.12 1</ambient>
+          <diffuse>0.16 0.48 0.18 1</diffuse>
+        </material>
+      </visual>
+      <visual name="lily_c">
+        <pose>6.5 -19.5 0.03 0 0 -0.8</pose>
+        <geometry><cylinder><radius>0.32</radius><length>0.02</length></cylinder></geometry>
+        <material>
+          <ambient>0.14 0.40 0.15 1</ambient>
+          <diffuse>0.20 0.55 0.22 1</diffuse>
         </material>
       </visual>
 

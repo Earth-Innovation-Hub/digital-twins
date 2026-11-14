@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Build a seamless sandy/muddy lake-bed albedo + UV-mapped bed.obj for Kiwanis.
+"""Build lake-bed + water albedo textures and planar-UV OBJs for Kiwanis.
 
 Writes into this model folder:
   materials/textures/bed_sand.png
-  meshes/bed.obj   (same geometry, planar ENU UVs, ~8 m per tile)
+  materials/textures/water_ripples.png
+  meshes/bed.obj     (planar ENU UVs, ~8 m per tile)
+  meshes/water.obj   (planar ENU UVs, ~12 m per tile)
 
   python3 mk_bed_texture.py
 """
@@ -15,7 +17,8 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-TILE_M = 8.0
+BED_TILE_M = 8.0
+WATER_TILE_M = 12.0
 TEX = 512
 
 
@@ -50,7 +53,7 @@ def fbm(x: float, y: float, octaves: int = 5) -> float:
     return total / norm
 
 
-def make_texture(path: Path, n: int = TEX) -> None:
+def make_bed_texture(path: Path, n: int = TEX) -> None:
     pixels = bytearray()
     for j in range(n):
         for i in range(n):
@@ -64,6 +67,25 @@ def make_texture(path: Path, n: int = TEX) -> None:
             b = int(28 + 42 * t)
             if grain > 0.78 and base < 0.45:
                 r, g, b = int(r * 0.65), int(g * 0.70), int(b * 0.75)
+            pixels.extend((max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))))
+    _write_png(path, n, n, pixels)
+    print(f"wrote {path} ({n}x{n})")
+
+
+def make_water_texture(path: Path, n: int = TEX) -> None:
+    """Subtle blue-green ripple / caustic tint for a semi-transparent surface."""
+    pixels = bytearray()
+    for j in range(n):
+        for i in range(n):
+            u, v = i / n, j / n
+            swell = fbm(u * 3.0, v * 3.0, 3)
+            rip = fbm(u * 14.0 + 1.3, v * 14.0 + 2.1, 4)
+            fine = fbm(u * 40.0, v * 40.0, 2)
+            wave = 0.55 * swell + 0.35 * rip + 0.10 * fine
+            # Darker mid-tones; transparency still shows the bed through.
+            r = int(10 + 18 * wave)
+            g = int(38 + 32 * wave)
+            b = int(52 + 42 * wave)
             pixels.extend((max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))))
     _write_png(path, n, n, pixels)
     print(f"wrote {path} ({n}x{n})")
@@ -87,7 +109,7 @@ def _write_png(path: Path, w: int, h: int, rgb: bytes) -> None:
         f.write(chunk(b"IEND", b""))
 
 
-def uv_map_bed(src: Path, dst: Path, tile_m: float = TILE_M) -> None:
+def uv_map_obj(src: Path, dst: Path, tile_m: float, label: str) -> None:
     verts, norms, faces = [], [], []
     with open(src, encoding="utf-8") as f:
         for line in f:
@@ -106,8 +128,11 @@ def uv_map_bed(src: Path, dst: Path, tile_m: float = TILE_M) -> None:
                     face.append((vi, ni))
                 faces.append(face)
 
+    if not norms:
+        norms = [(0.0, 0.0, 1.0)] * len(verts)
+
     uvs = [(x / tile_m, y / tile_m) for x, y, _ in verts]
-    lines = [f"# kiwanis_bed (planar UVs, tile {tile_m:.1f} m)", "o kiwanis_bed"]
+    lines = [f"# {label} (planar UVs, tile {tile_m:.1f} m)", f"o {label}"]
     for x, y, z in verts:
         lines.append(f"v {x:.5f} {y:.5f} {z:.5f}")
     for u, v in uvs:
@@ -121,17 +146,25 @@ def uv_map_bed(src: Path, dst: Path, tile_m: float = TILE_M) -> None:
     print(f"wrote {dst} verts={len(verts)} faces={len(faces)} tile={tile_m}m")
 
 
+def _ensure_backup(mesh: Path) -> Path:
+    bak = mesh.with_suffix(mesh.suffix + ".pre-uv")
+    if not bak.exists():
+        bak.write_bytes(mesh.read_bytes())
+        print(f"backup {bak}")
+    return bak
+
+
 def main():
     import sys
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT
-    tex = root / "materials" / "textures" / "bed_sand.png"
+    tex_dir = root / "materials" / "textures"
+    make_bed_texture(tex_dir / "bed_sand.png")
+    make_water_texture(tex_dir / "water_ripples.png")
+
     bed = root / "meshes" / "bed.obj"
-    make_texture(tex)
-    bak = bed.with_suffix(".obj.pre-uv")
-    if not bak.exists():
-        bak.write_bytes(bed.read_bytes())
-        print(f"backup {bak}")
-    uv_map_bed(bak if bak.exists() else bed, bed)
+    water = root / "meshes" / "water.obj"
+    uv_map_obj(_ensure_backup(bed), bed, BED_TILE_M, "kiwanis_bed")
+    uv_map_obj(_ensure_backup(water), water, WATER_TILE_M, "kiwanis_water")
 
 
 if __name__ == "__main__":

@@ -8,10 +8,22 @@ on Tempe Town Lake is a different world and container.
 - Origin: **33.374047 N, 111.939580 W** (lake centre); elev ≈ 335.28 m; ~12.7 acres
 - Shoreline: OSM way `29210987` (`kiwanis_shore_enu.json`); checked against satellite —
   NW lobe, NE peninsula pinch (~96 m), SE tip, NW cove; long-axis ~457 m ENU
-- Visuals: earcut water mesh; depth-dish bed (shore ~1 m → centre 2.44 m) with a
-  tiled silt/sand albedo (`materials/textures/bed_sand.png`, planar UVs ~8 m/tile);
-  park mesh with lake hole; west pier stub. Regenerate texture/UVs with
-  `python3 mk_bed_texture.py` in this model folder.
+- Visuals: earcut water mesh (~half transparent, ripple albedo
+  `materials/textures/water_ripples.png`, planar UVs ~12 m/tile); depth-dish bed
+  (shore ~1 m → centre 2.44 m) with tiled silt/sand albedo
+  (`materials/textures/bed_sand.png`, ~8 m/tile); park mesh with lake hole; west
+  pier stub; AprilTag 36h11 id 0 on a UV plane on the lake bed at ENU
+  (5 E, 4 N, z≈−2.08); water uses classic transparency (no PBR) so the
+  down-camera can see the bed/tag; static bottom
+  debris and surface floats clear of the `0,0` spawn. Regenerate textures/UVs
+  with `python3 mk_bed_texture.py` in this model folder.
+- Sensors / perception (Tempe + Locutus pattern): otter_k and xudrone each have a
+  fixed nadir camera (`/otter_k/camera_down/*`, `/xudrone/camera_down/*`);
+  `apriltag_ros` + `tag_detector` on both → `/coral/detections` (xudrone TF
+  isolated on `/xudrone/tf`). Boat `survey` and AUV `coverage` can stop on
+  `until: tag_detected`; instruction plans may run `when: tag_detected` steps
+  (undock + coverage, or helix). Stepping stone for visual servoing / habitat
+  deploy-recover.
 - Collision: tiled bed boxes + bank walls; park AABB slab visuals (ODE triangle-mesh
   collision is not used — it segfaults)
 

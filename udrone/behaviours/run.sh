@@ -8,6 +8,7 @@ export GZ_PARTITION="${GZ_PARTITION:-aquatic}"
 export PYTHONUNBUFFERED=1
 export UDRONE_SRC="${UDRONE_SRC:-/root/udrone_boat/src}"
 export UDRONE_HELIX_RUNNER="${UDRONE_HELIX_RUNNER:-/root/udrone_boat/behaviours/run_helix.py}"
+export UDRONE_COV_RUNNER="${UDRONE_COV_RUNNER:-/root/udrone_boat/behaviours/run_coverage.py}"
 
 set +u
 source /opt/ros/humble/setup.bash
@@ -19,4 +20,5 @@ ROOT="/root/udrone_boat/behaviours"
 if [ ! -f "$ROOT/coral_behaviours.py" ]; then
   ROOT="$(cd "$(dirname "$0")" && pwd)"
 fi
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 exec python3 -u "$ROOT/coral_behaviours.py"

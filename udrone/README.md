@@ -117,12 +117,12 @@ if the latch did not reach the requested state (e.g. out of range).
 Twin-side executor for typed commands (step 1 toward AI-pilot / mission_supervisor
 plumbing). Started automatically ~25 s after `simctl start` (log
 `/root/log/coral_behaviours.log`). Not the LLM — it only runs dock, boat goto,
-and helix and reports events.
+survey, helix, and coverage and reports events.
 
 | topic | direction | payload |
 |---|---|---|
 | `/coral/command` | in | JSON `std_msgs/String` |
-| `/coral/event` | out | accepted / arrived / dock_done / helix_done / failed / rejected / aborted |
+| `/coral/event` | out | accepted / arrived / dock_done / helix_done / coverage_done / survey_done / failed / rejected / aborted |
 | `/coral/status` | out | ~1 Hz: busy, phase, latch, boat/auv pose |
 
 Commands:
@@ -131,7 +131,9 @@ Commands:
 {"type":"dock","action":"attach"|"detach","id"?}
 {"type":"goto","along_heading_m":8,"id"?}
 {"type":"goto","east_m":..,"north_m":..,"relative_to":"current"|"world"|"heading","id"?}
+{"type":"survey","width_m":20,"length_m":20,"until"?: "tag_detected","id"?}
 {"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
+{"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "id"?}
 {"type":"hold"|"abort","id"?}
 ```
 
@@ -142,12 +144,13 @@ docker exec digital-twin-aquatic coral_cmd.py status
 docker exec digital-twin-aquatic coral_cmd.py dock detach
 docker exec digital-twin-aquatic coral_cmd.py goto --along 8
 docker exec digital-twin-aquatic coral_cmd.py helix --duration 20 --radius 0.4
+docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --layers 3
 docker exec digital-twin-aquatic coral_cmd.py dock attach
 ```
 
-`goto --along N` matches the transit demo (forward along current yaw). Helix uses
-the same controller as the test, without the MAE pass gate. One command at a
-time (`busy` rejects overlaps); `abort` cancels.
+`goto --along N` matches the transit demo (forward along current yaw). Helix and
+coverage share the same force→hull controller; coverage swaps `pos_des(t)` for a
+3D lawnmower. One command at a time (`busy` rejects overlaps); `abort` cancels.
 
 ## Demos and tests
 

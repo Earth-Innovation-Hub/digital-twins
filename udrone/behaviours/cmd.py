@@ -8,6 +8,8 @@ Examples:
   coral_cmd.py goto --east 8 --north 0
   coral_cmd.py goto --east 1.5 --north 2.0 --world
   coral_cmd.py helix --duration 20 --radius 0.4
+  coral_cmd.py coverage --width 12 --length 12 --layers 3
+  coral_cmd.py survey --width 20 --length 20 --until tag_detected
   coral_cmd.py abort
   coral_cmd.py status
 """
@@ -26,7 +28,10 @@ from std_msgs.msg import String
 CMD = "/coral/command"
 EVT = "/coral/event"
 STS = "/coral/status"
-TERMINAL = {"arrived", "dock_done", "helix_done", "failed", "rejected", "aborted"}
+TERMINAL = {
+    "arrived", "dock_done", "helix_done", "coverage_done", "survey_done",
+    "failed", "rejected", "aborted",
+}
 
 
 class Once(Node):
@@ -59,7 +64,9 @@ def spin_for(node, seconds):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Send a CoRAL behaviour command")
-    p.add_argument("type", choices=("dock", "goto", "helix", "abort", "hold", "status"))
+    p.add_argument("type", choices=(
+        "dock", "goto", "helix", "coverage", "survey", "abort", "hold", "status",
+    ))
     p.add_argument("action", nargs="?", help="attach|detach for dock")
     p.add_argument("--east", type=float, default=0.0)
     p.add_argument("--north", type=float, default=0.0)
@@ -76,6 +83,19 @@ def main(argv=None):
     p.add_argument("--omega", type=float, default=None)
     p.add_argument("--vx", type=float, default=None)
     p.add_argument("--z0", type=float, default=None)
+    p.add_argument("--width", type=float, default=None, help="survey/coverage width_m")
+    p.add_argument("--length", type=float, default=None, help="survey/coverage length_m")
+    p.add_argument("--swath", type=float, default=None, help="survey/coverage swath_m")
+    p.add_argument("--layers", type=int, default=None, help="coverage depth layers")
+    p.add_argument("--z-top", type=float, default=None, dest="z_top",
+                   help="coverage shallow depth (world z, m)")
+    p.add_argument("--z-bottom", type=float, default=None, dest="z_bottom",
+                   help="coverage deep depth (world z, m)")
+    p.add_argument("--speed", type=float, default=None, help="coverage speed_mps")
+    p.add_argument("--heading-deg", type=float, default=None, dest="heading_deg",
+                   help="survey/coverage lane heading degrees")
+    p.add_argument("--until", default=None,
+                   help="survey/coverage stop condition (tag_detected)")
     p.add_argument("--id", default=None)
     p.add_argument("--wait", type=float, default=180.0,
                    help="seconds to wait for a terminal event")
@@ -132,6 +152,52 @@ def main(argv=None):
         for val, key in mapping:
             if val is not None:
                 cmd[key] = val
+    elif args.type == "survey":
+        if args.width is None or args.length is None:
+            print("survey requires --width and --length", file=sys.stderr)
+            node.destroy_node()
+            rclpy.shutdown()
+            return 2
+        cmd["width_m"] = args.width
+        cmd["length_m"] = args.length
+        if args.swath is not None:
+            cmd["swath_m"] = args.swath
+        if args.heading_deg is not None:
+            cmd["heading_deg"] = args.heading_deg
+        if args.until:
+            cmd["until"] = args.until
+        if args.world:
+            cmd["relative_to"] = "world"
+            cmd["center_east_m"] = args.east
+            cmd["center_north_m"] = args.north
+        if args.arrive is not None:
+            cmd["arrive_m"] = args.arrive
+        if args.timeout is not None:
+            cmd["timeout_s"] = args.timeout
+    elif args.type == "coverage":
+        if args.width is not None:
+            cmd["width_m"] = args.width
+        if args.length is not None:
+            cmd["length_m"] = args.length
+        elif args.width is not None:
+            cmd["length_m"] = args.width
+        if args.swath is not None:
+            cmd["swath_m"] = args.swath
+        if args.layers is not None:
+            cmd["layers"] = args.layers
+        if args.z_top is not None:
+            cmd["z_top"] = args.z_top
+        if args.z_bottom is not None:
+            cmd["z_bottom"] = args.z_bottom
+        if args.speed is not None:
+            cmd["speed_mps"] = args.speed
+        if args.heading_deg is not None:
+            cmd["heading_deg"] = args.heading_deg
+        if args.until:
+            cmd["until"] = args.until
+        if args.world:
+            cmd["center_east_m"] = args.east
+            cmd["center_north_m"] = args.north
 
     print(f"SEND {json.dumps(cmd)}", flush=True)
     spin_for(node, 0.3)
@@ -165,7 +231,7 @@ def main(argv=None):
     ok = True
     if terminal.get("type") in ("failed", "rejected"):
         ok = False
-    if terminal.get("type") == "helix_done" and terminal.get("failed"):
+    if terminal.get("type") in ("helix_done", "coverage_done") and terminal.get("failed"):
         ok = False
     node.destroy_node()
     rclpy.shutdown()

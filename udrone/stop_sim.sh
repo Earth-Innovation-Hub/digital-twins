@@ -37,10 +37,15 @@ def kind(cmd):
                        "/usr/local/bin/udrone_thrust_adapter",
                        "/usr/local/bin/xroboato_thrust_adapter")):
         return "adapter"
-    if "xudrone_camera_bridge" in cmd or "front_camera_link/sensor/front_camera" in cmd:
+    if ("xudrone_camera_bridge" in cmd or "front_camera_link/sensor/front_camera" in cmd
+            or "xudrone_down_camera_bridge" in cmd
+            or "otter_k_down_camera_bridge" in cmd or "down_camera_link/sensor/down_camera" in cmd
+            or "apriltag_node" in cmd or "tag_detector" in cmd or "run_tags" in cmd
+            or "coral_tags" in cmd):
         return "bridge"
     if "coral_behaviours" in cmd or "udrone_boat/behaviours/coral_behaviours" in cmd \
-            or "udrone_boat/behaviours/run_helix" in cmd:
+            or "udrone_boat/behaviours/run_helix" in cmd \
+            or "udrone_boat/behaviours/run_coverage" in cmd:
         return "behaviours"
     if "PX4_SIM_MODEL=" in cmd or (cmd.startswith("bash") and "bin/px4" in cmd):
         return "launcher"

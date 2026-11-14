@@ -31,8 +31,8 @@ start_adapter() {
   fi
 }
 
-# start_camera_bridge <gz model>: waits for the camera topic, then bridges it.
-# xudrone_camera_bridge.sh holds a lock, so a second copy exits by itself
+# start_camera_bridge <gz model>: waits for front + down camera topics, then bridges.
+# xudrone_camera_bridge.sh holds a lock, so a second front copy exits by itself
 # (the host watchdog may have started one first).
 start_camera_bridge() {
   (
@@ -45,6 +45,17 @@ start_camera_bridge() {
       done
       GZ_MODEL_NAME="$0" exec /usr/local/bin/xudrone_camera_bridge.sh
     ' "$1" >> /root/log/xudrone_camera_bridge.log 2>&1 < /dev/null &
+  )
+  (
+    setsid bash -c '
+      for _ in $(seq 1 90); do
+        if gz topic -l 2>/dev/null | grep -q "$0.*down_camera/image"; then
+          break
+        fi
+        sleep 1
+      done
+      GZ_MODEL_NAME="$0" exec /usr/local/bin/xudrone_down_camera_bridge.sh
+    ' "$1" >> /root/log/xudrone_down_camera.log 2>&1 < /dev/null &
   )
 }
 
@@ -139,6 +150,8 @@ rm -f /root/.sim_hold
 
 pkill -f '^/usr/local/bin/udrone_thrust_adapter' 2>/dev/null || true
 pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/null || true
+pkill -f 'xudrone_down_camera_bridge|xudrone.*/down_camera' 2>/dev/null || true
+pkill -f 'apriltag_node|tag_detector|run_tags' 2>/dev/null || true
 sleep 1
 
 if ! pgrep -x MicroXRCEAgent >/dev/null; then
@@ -147,6 +160,10 @@ fi
 
 start_adapter xudrone_0
 start_camera_bridge xudrone_0
+(
+  sleep 35
+  exec /usr/local/bin/coral_tags_xudrone.sh
+) >> /root/log/coral_tags_xudrone.log 2>&1 &
 
 cd /root/PX4-Autopilot/build/px4_sitl_default
 tail -f /dev/null | env \

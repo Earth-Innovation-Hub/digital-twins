@@ -19,6 +19,9 @@ mkdir -p /root/log
 # Helpers a previous boot may have left behind (stop_sim.sh reaps them too).
 pkill -f '^/usr/local/bin/udrone_thrust_adapter' 2>/dev/null || true
 pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/null || true
+pkill -f 'xudrone_down_camera_bridge|xudrone.*/down_camera' 2>/dev/null || true
+pkill -f 'otter_k_down_camera_bridge|heron_0.*/down_camera' 2>/dev/null || true
+pkill -f 'apriltag_node|tag_detector|run_tags' 2>/dev/null || true
 pkill -f 'coral_behaviours|udrone_boat/behaviours/coral_behaviours' 2>/dev/null || true
 sleep 1
 
@@ -46,12 +49,31 @@ setsid nohup env GZ_PARTITION=aquatic UDRONE_GZ_MODEL=xudrone_1 \
   exec /root/start_udrone.sh --secondary
 ) >> /root/log/xudrone_secondary.log 2>&1 &
 
-# Behaviour library: /coral/command|event|status (dock, boat goto, helix).
+# Behaviour library: /coral/command|event|status (dock, goto, survey, helix, coverage).
 # Starts after a short delay so DDS / Gazebo are up; safe to retry if early.
 (
   sleep 25
   exec /usr/local/bin/coral_behaviours.sh
 ) >> /root/log/coral_behaviours.log 2>&1 &
+
+# Down-camera bridges + AprilTag stacks (boat + AUV; Tempe/Locutus workflow).
+(
+  sleep 20
+  exec /usr/local/bin/otter_k_down_camera_bridge.sh
+) >> /root/log/otter_k_down_camera.log 2>&1 &
+(
+  sleep 28
+  # Secondary AUV model is xudrone_1 when launched from the boat twin.
+  GZ_MODEL_NAME=xudrone_1 exec /usr/local/bin/xudrone_down_camera_bridge.sh
+) >> /root/log/xudrone_down_camera.log 2>&1 &
+(
+  sleep 35
+  exec /usr/local/bin/coral_tags.sh otter_k
+) >> /root/log/coral_tags.log 2>&1 &
+(
+  sleep 40
+  exec /usr/local/bin/coral_tags_xudrone.sh
+) >> /root/log/coral_tags_xudrone.log 2>&1 &
 
 cd /root/PX4-Autopilot/build/px4_sitl_default
 tail -f /dev/null | env \

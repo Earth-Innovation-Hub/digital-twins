@@ -30,6 +30,8 @@ copy_in "$HERE/start_udrone.sh"                   $N/start_udrone.sh
 copy_in "$HERE/start_boat.sh"                     $N/start_boat.sh
 copy_in "$HERE/stop_sim.sh"                       $N/stop_sim.sh
 copy_in "$HERE/xudrone_camera_bridge.sh"          $N/xudrone_camera_bridge.sh
+copy_in "$HERE/xudrone_down_camera_bridge.sh"     $N/xudrone_down_camera_bridge.sh
+copy_in "$HERE/otter_k_down_camera_bridge.sh"     $N/otter_k_down_camera_bridge.sh
 copy_in "$HERE/scripts/dock_command.py"           $N/dock_command.py
 copy_in "$HERE/airframe/60003_gz_xudrone"         $N/60003_gz_xudrone
 copy_in "$HERE/model/xudrone/model.sdf"           $N/xudrone_model.sdf

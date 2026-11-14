@@ -1,6 +1,6 @@
 # CoRAL behaviour library
 
-Typed command → dock / boat goto / helix → event. Runs inside
+Typed command → dock / boat goto / survey / helix / coverage → event. Runs inside
 `digital-twin-aquatic` on `/coral/{command,event,status}`.
 
 See the pack [README](../README.md#behaviour-library-coral) for the command
