@@ -31,6 +31,27 @@ class SpawnSafetyTests(unittest.TestCase):
         en = spawn.enroll_pose("ktwin-unit01", art["look_at"])
         self.assertEqual(en["vehicle"], "ktwin-unit01")
 
+    def test_site_origin_replaces_the_image_home_and_props_are_inserted(self):
+        text = """<sdf><world name="default">
+    <spherical_coordinates>
+      <latitude_deg>37.4593473</latitude_deg>
+      <longitude_deg>-118.4444592</longitude_deg>
+      <elevation>1401.47</elevation>
+    </spherical_coordinates>
+    <model name="ground_plane"></model>
+  </world></sdf>"""
+        out = spawn.apply_site(
+            text,
+            {"lat": 33.37344, "lon": -111.93548, "elev_m": 332.0},
+            '    <model name="prop_building_0"></model>\n',
+        )
+        self.assertIn("<latitude_deg>33.37344000</latitude_deg>", out)
+        self.assertIn("<longitude_deg>-111.93548000</longitude_deg>", out)
+        self.assertIn("<elevation>332.000</elevation>", out)
+        self.assertNotIn("37.4593473", out)
+        self.assertIn('name="prop_building_0"', out)
+        self.assertEqual(out.count("<spherical_coordinates>"), 1)
+
     def test_registry_port_is_published_off_the_lab_desktops(self):
         self.assertEqual(spawn.publish_args(40100), ["-p", "40100:40001"])
         for reserved in (40077, 40088, 40099, 80, 41000):

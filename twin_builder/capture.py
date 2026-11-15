@@ -101,7 +101,9 @@ def capture_site(job_dir, look_at, bbox, nadir_jpeg=None):
     hm = write_heightmap_png(job_dir / "heightmap.png", elevs)
     ortho = write_placeholder_ortho(job_dir / "ortho.png")
     nadir_path = job_dir / "nadir.jpg"
-    if nadir_jpeg and Path(nadir_jpeg).is_file():
+    if isinstance(nadir_jpeg, (bytes, bytearray)) and nadir_jpeg:
+        nadir_path.write_bytes(bytes(nadir_jpeg))
+    elif nadir_jpeg and Path(nadir_jpeg).is_file():
         nadir_path.write_bytes(Path(nadir_jpeg).read_bytes())
     else:
         # Copy ortho as stand-in for VLM input

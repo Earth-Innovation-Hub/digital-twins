@@ -7,6 +7,7 @@ Bind to localhost / overlay only. Do not expose without auth.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import secrets
@@ -16,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import bake, spawn
+from . import bake, osm_buildings, satellite_ground, spawn, vlm_props
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -47,8 +48,49 @@ def _run_job(job_id):
                 job.update(extra)
 
         set_status("capturing", "Capturing DEM and nadir")
-        set_status("baking", "Baking heightmap world and VLM props")
-        artifact = bake.bake_job(job, job_root=JOB_ROOT / job_id)
+        nadir_path = None
+        encoded = job.pop("nadir_b64", "") or ""
+        if encoded.startswith("data:image/jpeg;base64,"):
+            encoded = encoded.split(",", 1)[1]
+        if encoded:
+            try:
+                raw = base64.b64decode(encoded, validate=False)
+            except (ValueError, TypeError):
+                raw = b""
+            if raw:
+                nadir_path = JOB_ROOT / job_id / "viewport.jpg"
+                nadir_path.parent.mkdir(parents=True, exist_ok=True)
+                nadir_path.write_bytes(raw)
+        set_status("baking", "Reading OpenStreetMap buildings for the patch")
+        try:
+            artifact = bake.bake_job(
+                job, job_root=JOB_ROOT / job_id,
+                nadir_jpeg=str(nadir_path) if nadir_path else None,
+            )
+        except Exception as bake_error:
+            # Heightmap bake is best-effort. GPS and props are applied to the
+            # world PX4 actually loads, inside spawn.
+            artifact = {
+                "callsign": job["callsign"],
+                "look_at": job["look_at"],
+                "bbox": job.get("bbox") or {},
+                "airframe": "x500_gimbal",
+                "world_sdf": "",
+                "props": [],
+                "bake_error": f"{type(bake_error).__name__}: {str(bake_error)[:160]}",
+            }
+        if not artifact.get("props") and nadir_path:
+            artifact["props"] = vlm_props.detect_props(
+                nadir_path, job["look_at"], job.get("bbox") or {},
+            )
+        osm = osm_buildings.buildings_in_job(job)
+        artifact["props"] = osm_buildings.merge_buildings(artifact.get("props") or [], osm)
+        artifact["osm_buildings"] = len(osm)
+        set_status("baking", "Fetching the satellite ground for the patch")
+        ground = satellite_ground.fetch_ground(job, JOB_ROOT / job_id / "ground.jpg")
+        if ground:
+            artifact["ground_image"] = ground["path"]
+            artifact["ground_size_m"] = [ground["width_m"], ground["length_m"]]
         if job.get("host_port") is None and os.environ.get("DEEPGIS_TWIN_SPAWN_DRY_RUN") != "1":
             set_status("failed", "host_port from the simulation registry is required")
             return
@@ -137,7 +179,10 @@ class Handler(BaseHTTPRequestHandler):
             "id": job_id,
             "callsign": callsign,
             "vehicle_class": data.get("vehicle_class") or "kestrel",
-            "radius_m": data.get("radius_m") or 150,
+            "count": 1,
+            "width_m": data.get("width_m") or data.get("radius_m") or 150,
+            "length_m": data.get("length_m") or data.get("radius_m") or 150,
+            "nadir_b64": data.get("nadir_b64") or "",
             "look_at": data.get("look_at") or {},
             "bbox": data.get("bbox") or {},
             "user": data.get("user"),

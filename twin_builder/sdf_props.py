@@ -41,8 +41,9 @@ def validate_props(raw):
                 size_m = list(defaults)
         else:
             size_m = list(defaults)
-        # Hard caps so a bad VLM cannot flood the world with kilometre boxes
-        size_m = [max(0.2, min(80.0, s)) for s in size_m]
+        # Horizontal sizes can be a real footprint. Height stays capped.
+        caps = (250.0, 250.0, 80.0)
+        size_m = [max(0.2, min(caps[i], size_m[i])) for i in range(3)]
         out.append({
             "class": cls,
             "lat": float(lat),
@@ -63,10 +64,10 @@ def prop_model_sdf(name, prop, x, y, z=0.0):
     if spec["shape"] == "cylinder":
         # size_m = [diameter, diameter, height]
         geom = f"<cylinder><radius>{sx / 2:.3f}</radius><length>{sz:.3f}</length></cylinder>"
-        z_off = sz / 2.0
+        z_off = sz / 2.0 + 0.02
     else:
         geom = f"<box><size>{sx:.3f} {sy:.3f} {sz:.3f}</size></box>"
-        z_off = sz / 2.0
+        z_off = sz / 2.0 + 0.02
     return f"""    <model name="{name}">
       <static>true</static>
       <pose>{x:.3f} {y:.3f} {z + z_off:.3f} 0 0 {yaw:.4f}</pose>

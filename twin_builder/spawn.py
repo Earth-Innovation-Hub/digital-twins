@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import time
@@ -18,7 +19,9 @@ PROTECTED = frozenset({
     "zenoh-locutus", "zenoh-heron-tempe",
 })
 
-DEFAULT_IMAGE = os.environ.get("DEEPGIS_TWIN_SESSION_IMAGE", "openuav/twin:latest")
+# The lab image that actually exists and already serves noVNC on 40001.
+# openuav/twin:latest was the planned session image and is not built.
+DEFAULT_IMAGE = os.environ.get("DEEPGIS_TWIN_SESSION_IMAGE", "digital-twin-locutus:llm")
 # The session image serves noVNC on this port; the host side is the registry's host_port.
 NOVNC_PORT = int(os.environ.get("DEEPGIS_TWIN_NOVNC_PORT", "40001"))
 # Lab desktops. The simulation registry never assigns these to a session.
@@ -53,9 +56,109 @@ def publish_args(host_port):
 
 
 def _domain_id(callsign):
-    """Stable ROS_DOMAIN_ID in 100–200 excluding known lab domains."""
+    """Stable ROS_DOMAIN_ID in 100–189, above the hostname hash used by lab twins."""
     h = int(hashlib.sha256(callsign.encode()).hexdigest()[:4], 16)
     return 100 + (h % 90)  # 100..189
+
+
+def _dds_ns(callsign):
+    """ROS 2 / PX4 namespace: hyphens are not legal in topic names."""
+    ns = "".join(c if c.isalnum() or c == "_" else "_" for c in callsign)
+    if not ns or not ns[0].isalpha():
+        ns = "ktwin_" + ns
+    return ns
+
+
+def _session_script():
+    """Desktop, one x500, and the DDS agent. Does not start the course rover."""
+    return """#!/bin/bash
+mkdir -p /root/log
+echo "[session] callsign=${DEEPGIS_CALLSIGN} domain=${ROS_DOMAIN_ID} partition=${GZ_PARTITION}" | tee -a /root/log/twin.log
+export DISPLAY=:1
+export VGL_DISPLAY="${VGL_DISPLAY:-:0.0}"
+export PX4_GZ_WORLD="${PX4_GZ_WORLD:-default}"
+export PX4_GZ_MODEL="${PX4_GZ_MODEL:-x500_gimbal}"
+export PX4_GZ_MODEL_POSE="${PX4_GZ_MODEL_POSE:-0,0,0.1,0,0,0}"
+/usr/local/bin/start_desktop.sh >> /root/log/desktop.log 2>&1 &
+for _ in $(seq 1 90); do
+  [ -S /tmp/.X11-unix/X1 ] && break
+  sleep 1
+done
+if [ -f /opt/ros/humble/setup.bash ]; then
+  source /opt/ros/humble/setup.bash
+fi
+if [ -x /root/run_qgroundcontrol.sh ]; then
+  ( while true; do /root/run_qgroundcontrol.sh >> /root/log/qgc.log 2>&1 || true; sleep 15; done ) &
+fi
+if [ -x /usr/local/bin/MicroXRCEAgent ]; then
+  ( while true; do /usr/local/bin/MicroXRCEAgent udp4 -p 8888 >> /root/log/agent.log 2>&1 || true; sleep 5; done ) &
+fi
+cd /root/PX4-Autopilot
+exec vglrun make px4_sitl gz_x500_gimbal >> /root/log/twin.log 2>&1
+"""
+
+
+_SPHERICAL_RE = re.compile(r"<spherical_coordinates>.*?</spherical_coordinates>", re.S)
+
+
+def _origin_block(lat, lon, elev):
+    return (
+        "    <spherical_coordinates>\n"
+        "      <surface_model>EARTH_WGS84</surface_model>\n"
+        "      <world_frame_orientation>ENU</world_frame_orientation>\n"
+        f"      <latitude_deg>{float(lat):.8f}</latitude_deg>\n"
+        f"      <longitude_deg>{float(lon):.8f}</longitude_deg>\n"
+        f"      <elevation>{float(elev):.3f}</elevation>\n"
+        "      <heading_deg>0</heading_deg>\n"
+        "    </spherical_coordinates>"
+    )
+
+
+def apply_site(text, look, props_xml=""):
+    """Force the world GPS origin to the viewport and splice generated models.
+
+    Replaces an existing spherical_coordinates block. The Locutus image ships
+    with Bishop Scarp in default.sdf, and PX4/QGC read that block as home.
+    """
+    lat, lon = look.get("lat"), look.get("lon")
+    if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))):
+        return text
+    elev = look.get("elev_m") or 0
+    block = _origin_block(lat, lon, elev)
+    if _SPHERICAL_RE.search(text):
+        text = _SPHERICAL_RE.sub(block, text, count=1)
+    else:
+        needle = '<world name="default">'
+        if needle in text:
+            text = text.replace(needle, needle + "\n" + block, 1)
+    if props_xml and 'name="prop_' not in text and "</world>" in text:
+        text = text.replace("</world>", props_xml + "  </world>", 1)
+    return text
+
+
+def _patched_world(artifact, dest, image):
+    """PX4's default world, viewport origin, plus any synthesized prop models."""
+    look = artifact.get("look_at") or {}
+    try:
+        proc = _docker(
+            "run", "--rm", "--entrypoint", "cat", image,
+            "/root/PX4-Autopilot/Tools/simulation/gz/worlds/default.sdf",
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    from .sdf_props import props_xml_fragment
+    from .satellite_ground import apply_ground
+    lat, lon = look.get("lat"), look.get("lon")
+    fragment = ""
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+        fragment, _clean = props_xml_fragment(artifact.get("props") or [], lat, lon)
+    text = apply_site(proc.stdout, look, fragment)
+    size = artifact.get("ground_size_m") or []
+    ground = artifact.get("ground_image")
+    if ground and Path(ground).is_file() and len(size) >= 2:
+        text = apply_ground(text, float(size[0]), float(size[1]))
+    dest.write_text(text, encoding="utf-8")
+    return dest
 
 
 def session_dir(callsign):
@@ -139,17 +242,19 @@ def spawn_session(artifact, dry_run=False):
     env_path = session_dir(callsign) / "session.env"
     env_path.write_text(
         "\n".join([
-            f"PX4_UXRCE_DDS_NS={callsign}",
+            f"PX4_UXRCE_DDS_NS={_dds_ns(callsign)}",
             f"ROS_DOMAIN_ID={meta['ros_domain_id']}",
             f"GZ_PARTITION={callsign}",
-            f"PX4_GZ_MODEL=x500_gimbal",
-            f"PX4_GZ_WORLD={artifact.get('world_sdf', '')}",
+            "PX4_GZ_MODEL=x500_gimbal",
+            "PX4_GZ_WORLD=default",
             f"DEEPGIS_CALLSIGN={callsign}",
             f"DEEPGIS_LAT={artifact['look_at']['lat']}",
             f"DEEPGIS_LON={artifact['look_at']['lon']}",
         ]) + "\n",
         encoding="utf-8",
     )
+    script_path = session_dir(callsign) / "start_session.sh"
+    script_path.write_text(_session_script(), encoding="utf-8")
     container = f"digital-twin-session-{callsign}"
     if dry:
         meta["status"] = "ready"
@@ -161,14 +266,30 @@ def spawn_session(artifact, dry_run=False):
 
     # Remove any prior session with this callsign only
     _docker("rm", "-f", container, check=False)
-    world_host = str(Path(artifact["world_sdf"]).resolve().parent)
+    image = os.environ.get("DEEPGIS_TWIN_SESSION_IMAGE", DEFAULT_IMAGE)
+    world_file = _patched_world(artifact, session_dir(callsign) / "default.sdf", image)
     args = [
         "run", "-d", "--name", container,
+        "--runtime", "nvidia",
         "--restart", "unless-stopped",
+        "--shm-size", "1g",
+        "--hostname", _dds_ns(callsign),
         "--env-file", str(env_path),
-        "-v", f"{world_host}:/twin/world:ro",
+        "-e", "VGL_DISPLAY=:0.0",
+        "-e", "NVIDIA_VISIBLE_DEVICES=all",
+        "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
+        "-v", "/tmp/.X11-unix/X0:/tmp/.X11-unix/X0:rw",
+        "-v", f"{script_path}:/usr/local/bin/start_session.sh:ro",
+    ]
+    if world_file is not None:
+        args += ["-v", f"{world_file}:/root/PX4-Autopilot/Tools/simulation/gz/worlds/default.sdf:ro"]
+    ground = artifact.get("ground_image")
+    if ground and Path(ground).is_file():
+        args += ["-v", f"{ground}:/root/ground.jpg:ro"]
+    args += [
         *publish_args(host_port),
-        DEFAULT_IMAGE,
+        image,
+        "bash", "/usr/local/bin/start_session.sh",
     ]
     try:
         _docker(*args)

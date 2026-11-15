@@ -68,7 +68,7 @@ def _mcp_describe(image_b64, look_at, bbox):
         "params": {
             "name": "describe_image",
             "arguments": {
-                "image_b64": image_b64,
+                "image": image_b64,
                 "prompt": prompt,
                 "system_prompt": SYSTEM,
                 "json_schema": VLM_SCHEMA,
@@ -86,12 +86,22 @@ def _mcp_describe(image_b64, look_at, bbox):
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    # dreams_mcp may nest under result.content or result.json
+        raw = resp.read().decode("utf-8")
+        content_type = resp.headers.get("Content-Type", "")
+    if "text/event-stream" in content_type:
+        raw = next((ln[6:] for ln in raw.splitlines() if ln.startswith("data: ")), "")
+    payload = json.loads(raw) if raw else {}
     result = payload.get("result") if isinstance(payload, dict) else None
     if not isinstance(result, dict):
         return []
-    parsed = result.get("json")
+    structured = (result.get("structuredContent") or {}).get("result")
+    if not isinstance(structured, dict):
+        text = (result.get("content") or [{}])[0].get("text", "")
+        try:
+            structured = json.loads(text) if text else {}
+        except ValueError:
+            structured = {}
+    parsed = structured.get("json") if isinstance(structured, dict) else None
     if isinstance(parsed, str):
         try:
             parsed = json.loads(parsed)
@@ -99,6 +109,8 @@ def _mcp_describe(image_b64, look_at, bbox):
             parsed = None
     if isinstance(parsed, dict) and isinstance(parsed.get("objects"), list):
         return parsed["objects"]
+    if isinstance(structured, dict) and isinstance(structured.get("objects"), list):
+        return structured["objects"]
     return []
 
 
@@ -110,7 +122,7 @@ def detect_props(nadir_path, look_at, bbox):
     try:
         image_b64 = base64.b64encode(path.read_bytes()).decode("ascii")
         raw = _mcp_describe(image_b64, look_at, bbox)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError, KeyError):
         return []
     # Drop unknown keys early; sdf_props.validate_props does the rest
     out = []
