@@ -19,6 +19,10 @@ PROTECTED = frozenset({
 })
 
 DEFAULT_IMAGE = os.environ.get("DEEPGIS_TWIN_SESSION_IMAGE", "openuav/twin:latest")
+# The session image serves noVNC on this port; the host side is the registry's host_port.
+NOVNC_PORT = int(os.environ.get("DEEPGIS_TWIN_NOVNC_PORT", "40001"))
+# Lab desktops. The simulation registry never assigns these to a session.
+LAB_PORTS = frozenset({40077, 40088, 40099})
 SESSIONS_ROOT = Path(os.environ.get("DEEPGIS_TWIN_SESSIONS_DIR", "/var/twin-sessions"))
 IDLE_TTL_SEC = int(os.environ.get("DEEPGIS_TWIN_IDLE_TTL_SEC", str(2 * 3600)))
 DISK_QUOTA_MB = int(os.environ.get("DEEPGIS_TWIN_DISK_QUOTA_MB", "2048"))
@@ -37,6 +41,15 @@ def _assert_safe_name(name):
 
 def _docker(*args, check=True):
     return subprocess.run(["docker", *args], check=check, capture_output=True, text=True)
+
+
+def publish_args(host_port):
+    """Docker publish flags for a registry host_port onto the image's noVNC port."""
+    if isinstance(host_port, bool) or not isinstance(host_port, int):
+        raise ValueError("host_port must be an integer from the simulation registry")
+    if host_port in LAB_PORTS or not 40000 <= host_port <= 40999:
+        raise ValueError(f"refusing host_port {host_port}")
+    return ["-p", f"{host_port}:{NOVNC_PORT}"]
 
 
 def _domain_id(callsign):
@@ -100,6 +113,7 @@ def write_session_meta(callsign, artifact, extra=None):
         "ros_domain_id": _domain_id(callsign),
         "gz_partition": callsign,
         "dds_ns": callsign,
+        "host_port": artifact.get("host_port"),
     }
     if extra:
         meta.update(extra)
@@ -114,6 +128,12 @@ def spawn_session(artifact, dry_run=False):
     """
     callsign = artifact["callsign"]
     _assert_safe_name(callsign)
+    host_port = artifact.get("host_port")
+    dry = dry_run or os.environ.get("DEEPGIS_TWIN_SPAWN_DRY_RUN") == "1"
+    if host_port is not None:
+        publish_args(host_port)
+    elif not dry:
+        raise ValueError("host_port from the simulation registry is required")
     enforce_quota(callsign)
     meta = write_session_meta(callsign, artifact)
     env_path = session_dir(callsign) / "session.env"
@@ -131,7 +151,7 @@ def spawn_session(artifact, dry_run=False):
         encoding="utf-8",
     )
     container = f"digital-twin-session-{callsign}"
-    if dry_run or os.environ.get("DEEPGIS_TWIN_SPAWN_DRY_RUN") == "1":
+    if dry:
         meta["status"] = "ready"
         meta["dry_run"] = True
         meta["container"] = container
@@ -147,6 +167,7 @@ def spawn_session(artifact, dry_run=False):
         "--restart", "unless-stopped",
         "--env-file", str(env_path),
         "-v", f"{world_host}:/twin/world:ro",
+        *publish_args(host_port),
         DEFAULT_IMAGE,
     ]
     try:

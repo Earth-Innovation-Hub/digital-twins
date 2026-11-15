@@ -49,6 +49,11 @@ def _run_job(job_id):
         set_status("capturing", "Capturing DEM and nadir")
         set_status("baking", "Baking heightmap world and VLM props")
         artifact = bake.bake_job(job, job_root=JOB_ROOT / job_id)
+        if job.get("host_port") is None and os.environ.get("DEEPGIS_TWIN_SPAWN_DRY_RUN") != "1":
+            set_status("failed", "host_port from the simulation registry is required")
+            return
+        if job.get("host_port") is not None:
+            artifact["host_port"] = int(job["host_port"])
         set_status("spawning", "Starting session container", artifact=artifact)
         meta = spawn.spawn_session(artifact)
         if meta.get("status") == "failed":
@@ -120,6 +125,14 @@ class Handler(BaseHTTPRequestHandler):
         protected = set(data.get("protected_names") or []) | spawn.PROTECTED
         if callsign in protected:
             return self._json(400, {"error": "protected name"})
+        raw_port = data.get("host_port")
+        host_port = None
+        if raw_port is not None:
+            try:
+                host_port = raw_port if isinstance(raw_port, int) and not isinstance(raw_port, bool) else int(raw_port)
+                spawn.publish_args(host_port)
+            except (TypeError, ValueError) as e:
+                return self._json(400, {"error": str(e)})
         job = {
             "id": job_id,
             "callsign": callsign,
@@ -128,6 +141,7 @@ class Handler(BaseHTTPRequestHandler):
             "look_at": data.get("look_at") or {},
             "bbox": data.get("bbox") or {},
             "user": data.get("user"),
+            "host_port": host_port,
             "status": "queued",
             "message": "Queued on twin builder",
             "created": time.time(),

@@ -7,8 +7,12 @@ Dreamslab worker that turns a Cesium look-at + bbox into a Gazebo x500 twin.
 1. **capture** — DEM grid → 16-bit heightmap; ortho/nadir image
 2. **vlm_props** — nadir → JSON scene graph (catalog classes only, ≤40)
 3. **bake** — fill `kestrel/worlds/site_template` SDF
-4. **spawn** — `digital-twin-session-<callsign>` (never locutus/otter/aquatic)
-5. **enroll** — pose-agent env for DeepGIS chase
+4. **spawn** — `digital-twin-session-<callsign>` (never locutus/otter/aquatic).
+   The `host_port` comes from DeepGIS `core.Simulation` (session band 40100–40199).
+   Docker publishes it onto the image noVNC port 40001. Lab ports 40077, 40088,
+   and 40099 are refused.
+5. **enroll** — pose-agent env for DeepGIS chase. The owner's session row
+   appears on the Sims tab beside the lab desktops.
 
 ## Run (dreamslab)
 
