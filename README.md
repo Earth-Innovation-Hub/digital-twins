@@ -12,7 +12,7 @@ rebuild does not lose the lab's setup. Ops scripts that know private addressing
 |---|---|---|---|---|---|---|
 | [`otter/`](otter/) | **otter** | Clearpath Heron ASV | `digital-twin-water-tempe-lake` | :40099 | domain 27 | Tempe Town Lake |
 | [`udrone/`](udrone/) | **otter_k** + **xudrone** | Heron ASV + uDrone AUV (CoRAL pair) | `digital-twin-aquatic` | :40077 | domain 84 / `GZ_PARTITION=aquatic` | Kiwanis Lake |
-| [`badger/`](badger/) | **badger** | Aion R1 + forward camera | `digital-twin-locutus` | (with kestrel) | domain 53 | Bishop scarp |
+| [`badger/`](badger/) | **badger** | Earth Rover trike | `digital-twin-locutus` | (with kestrel) | domain 53 | Bishop scarp |
 | [`kestrel/`](kestrel/) | **kestrel** | PX4 `x500_gimbal` (stock) | `digital-twin-locutus` | :40088 | domain 53 | Bishop scarp |
 | [`twin_builder/`](twin_builder/) | `ktwin-*` (on demand) | x500_gimbal session | `digital-twin-session-*` | (ephemeral) | (per session) | Cesium look-at patch |
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# badger, the Aion R1 rover with a forward camera: PX4 instance 1 in the twin's
+# badger, the Earth Rover trike (model earth_rover): PX4 instance 1 in the twin's
 # running Gazebo world (instance 0 is kestrel, the x500_gimbal). Every topic is
 # rooted at its callsign. Also starts, and stops with it:
 #   px4_relay (ns /badger)  /badger/fmu/out/* -> /badger/px4/*   (routed by zenoh-locutus)
@@ -28,7 +28,9 @@ if [ "$ready" != 1 ]; then
   exit 1
 fi
 
-MODEL=r1_rover_cam_1
+MODEL=earth_rover_1
+gz service -s /world/default/remove --reqtype gz.msgs.Entity --reptype gz.msgs.Boolean \
+  --timeout 3000 --req "name: \"r1_rover_cam_1\" type: MODEL" >/dev/null 2>&1
 gz service -s /world/default/remove --reqtype gz.msgs.Entity --reptype gz.msgs.Boolean \
   --timeout 3000 --req "name: \"$MODEL\" type: MODEL" >/dev/null 2>&1
 
@@ -57,8 +59,9 @@ children+=($!)
 
 # The twin launch exports PX4_UXRCE_DDS_NS=kestrel for instance 0; this one is badger
 export PX4_UXRCE_DDS_NS=$ROBOT
-export PX4_SYS_AUTOSTART=4009
-export PX4_SIM_MODEL=gz_r1_rover_cam
+export PX4_SYS_AUTOSTART=4024
+export PX4_SIM_MODEL=gz_earth_rover
 export PX4_GZ_WORLD=default
-export PX4_GZ_MODEL_POSE="-8,6,0.35,0,0,0"
+# Wheel radius is 0.33 m and the model origin is on the ground, so spawn just above it.
+export PX4_GZ_MODEL_POSE="-8,6,0.40,0,0,0"
 ../bin/px4 -i 1 -d

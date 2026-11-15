@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# @name Gazebo Earth Rover
+#
+# @type Rover
+# @class Rover
+#
+# Earth Rover trike. PX4's Ackermann controller is a bicycle model: one throttle
+# and one steer angle. Both go to the front wheel (26 inch, radius 0.330 m).
+# Wheelbase is 1.30 m, rear axle at x=-0.40 and the front wheel at x=0.90.
+# Full throttle is actuator value 108, which the Gazebo bridge publishes as
+# 8 rad/s (about 2.6 m/s). The rear wheels are passive.
+#
+
+. ${R}etc/init.d/rc.rover_ackermann_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=default}
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=gz_earth_rover}
+
+param set-default SIM_GZ_EN 1
+# Simulator time is not wall time. Keep the PX4 timestamps.
+param set-default UXRCE_DDS_SYNCT 0
+
+# Gazebo GPS has no transport delay. A disarmed trike can creep, so skip the
+# "GPS drift while standing still" arming checks (bits 5 and 7).
+param set-default EKF2_GPS_DELAY 10
+param set-default EKF2_GPS_CHECK 863
+
+param set-default NAV_ACC_RAD 1.0
+
+# --- Ackermann geometry -------------------------------------------------------------
+param set-default RA_WHEEL_BASE 1.30
+param set-default RA_ACC_RAD_GAIN 2
+param set-default RA_ACC_RAD_MAX 4
+param set-default RA_MAX_STR_ANG 0.5236
+param set-default RA_STR_RATE_LIM 90
+
+# --- Speed --------------------------------------------------------------------------
+param set-default RO_ACCEL_LIM 1.0
+param set-default RO_DECEL_LIM 1.5
+param set-default RO_JERK_LIM 2
+param set-default RO_MAX_THR_SPEED 2.6
+param set-default RO_SPEED_LIM 2.0
+param set-default RO_SPEED_I 0.1
+param set-default RO_SPEED_P 0.6
+
+# --- Yaw ----------------------------------------------------------------------------
+param set-default RO_YAW_RATE_I 0.05
+param set-default RO_YAW_RATE_P 0.8
+param set-default RO_YAW_RATE_LIM 60
+param set-default RO_YAW_P 2.5
+
+param set-default PP_LOOKAHD_GAIN 1
+param set-default PP_LOOKAHD_MAX 10
+param set-default PP_LOOKAHD_MIN 2
+
+# --- Front wheel --------------------------------------------------------------------
+# Output is offset by 100 inside the Gazebo wheel bridge. 92..108 is -8..+8 rad/s.
+param set-default SIM_GZ_WH_FUNC1 101
+param set-default SIM_GZ_WH_MIN1 92
+param set-default SIM_GZ_WH_MAX1 108
+param set-default SIM_GZ_WH_DIS1 100
+
+# --- Front steering -----------------------------------------------------------------
+# Servo angles are degrees. The bridge publishes radians on /model/<name>/servo_0.
+param set-default SIM_GZ_SV_MAXA1 30
+param set-default SIM_GZ_SV_MINA1 -30
+param set-default CA_SV_CS_COUNT 1
+param set-default SIM_GZ_SV_FUNC1 201
+param set-default SIM_GZ_SV_REV 1

@@ -18,7 +18,7 @@ Lab-specific pieces live elsewhere:
 | Surface / mission executor | `dreams_robot_agent` in that repo |
 
 If a future change makes the airframe or model diverge from upstream, put the
-delta here the same way `../badger/` holds `r1_rover_cam`.
+delta here the same way `../badger/` holds `earth_rover`.
 
 ## Site template (AI Pilot create_twin)
 
