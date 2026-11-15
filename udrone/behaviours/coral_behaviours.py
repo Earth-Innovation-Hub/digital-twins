@@ -22,6 +22,16 @@ Commands:
    "center_east_m"?, "center_north_m"?, "relative_to":"current"|"world",
    "until"?: "tag_detected", "arrive_m"?, "id"?}
   {"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
+  {"type":"swim","north_m"?, "east_m"?, "along_heading_m"?,
+   "relative_to":"current"|"world"|"heading", "depth_m"?, "speed_mps"?,
+   "arrive_m"?, "id"?}
+      AUV straight leg on the helix force loop. current = ENU offset,
+      world = absolute ENU, heading = along_heading_m forward and east_m
+      to starboard. Rejected while the latch is attached. Depth defaults
+      to the depth at arm time.
+  {"type":"hoop","id"?}
+      Search for the 1 m orange hula hoop with the front camera and swim
+      through the opening. Rejected while the latch is attached.
   {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?,
    "z_top"?, "z_bottom"?, "speed_mps"?, "heading_deg"?,
    "center_east_m"?, "center_north_m"?, "until"?: "tag_detected", "id"?}
@@ -34,7 +44,7 @@ Commands:
 
 Events:
   {"type":"accepted"|"rejected"|"failed"|"arrived"|"survey_done"|"dock_done"|
-   "helix_done"|"coverage_done"|"aborted", "id", ...}
+   "helix_done"|"swim_done"|"hoop_done"|"coverage_done"|"aborted", "id", ...}
 
 Status (1 Hz): busy, phase, latch, boat/auv pose, active_id, last_event.
 
@@ -142,7 +152,7 @@ class CoralBehaviours(Node):
             qos_profile_sensor_data,
         )
 
-        self.phase = "idle"          # idle | dock | goto | survey | helix | coverage | approach | hold
+        self.phase = "idle"          # idle | dock | goto | survey | helix | swim | coverage | approach | hold
         self.active_id = None
         self.busy = False
         self.last_event = None
@@ -315,6 +325,10 @@ class CoralBehaviours(Node):
             self._start_survey(cmd)
         elif kind == "helix":
             self._start_helix(cmd)
+        elif kind == "swim":
+            self._start_swim(cmd)
+        elif kind == "hoop":
+            self._start_hoop(cmd)
         elif kind == "coverage":
             self._start_coverage(cmd)
         elif kind in ("approach_tag", "approach"):
@@ -732,6 +746,124 @@ class CoralBehaviours(Node):
         }
         self._spawn_auv("helix", cmd["id"], runner, env, meta, "/tmp/coral_helix.log")
 
+    def _start_swim(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "swim rejected: xudrone is latched; detach first"})
+            return
+        rel = str(cmd.get("relative_to", "current")).lower()
+        if rel == "absolute":
+            rel = "world"
+        if rel not in ("current", "world", "heading"):
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "swim.relative_to must be current|world|heading"})
+            return
+        try:
+            north = float(cmd.get("north_m", 0.0) or 0.0)
+            east = float(cmd.get("east_m", 0.0) or 0.0)
+            along = cmd.get("along_heading_m")
+            along_f = None if along is None else float(along)
+            speed = float(cmd.get("speed_mps", os.environ.get("UDRONE_SWIM_SPEED", "0.20")))
+            arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_SWIM_ARRIVE", "1.0")))
+        except (TypeError, ValueError):
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "swim offsets and speed must be numbers"})
+            return
+        if rel == "heading":
+            fwd = along_f if along_f is not None else north
+            leg = math.hypot(fwd, east)
+        elif rel == "world":
+            leg = None
+        else:
+            leg = math.hypot(east, north)
+        if leg is not None and leg < 0.5:
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "swim leg is shorter than 0.5 m"})
+            return
+        if leg is not None and leg > 60.0:
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "swim leg is longer than 60 m"})
+            return
+        if speed <= 0.0 or speed > 0.5:
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "swim.speed_mps must be in (0, 0.5]"})
+            return
+        depth = cmd.get("depth_m", cmd.get("z0"))
+        if depth not in (None, ""):
+            try:
+                depth = float(depth)
+            except (TypeError, ValueError):
+                self._emit({"type": "rejected", "id": cmd["id"],
+                            "reason": "swim depth_m must be a number"})
+                return
+            # depth_m is metres below the surface, matching the status line.
+            # The tracker holds Gazebo z, which is up.
+            if depth > 0.0:
+                depth = -depth
+        runner = os.environ.get(
+            "UDRONE_SWIM_RUNNER",
+            "/root/udrone_boat/behaviours/run_swim.py",
+        )
+        if not os.path.isfile(runner):
+            here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_swim.py")
+            if not os.path.isfile(here):
+                self._emit({"type": "rejected", "id": cmd["id"],
+                            "reason": f"swim runner not found ({runner})"})
+                return
+            runner = here
+        env = {
+            **os.environ,
+            "GZ_PARTITION": os.environ.get("GZ_PARTITION", "aquatic"),
+            "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "84"),
+            "UDRONE_SWIM_NORTH": str(north),
+            "UDRONE_SWIM_EAST": str(east),
+            "UDRONE_SWIM_REL": rel,
+            "UDRONE_SWIM_SPEED": str(speed),
+            "UDRONE_SWIM_ARRIVE": str(arrive),
+            "UDRONE_GZ_MODEL": self.auv_model,
+            "UDRONE_PX4_INSTANCE": str(self.auv_px4),
+            "UDRONE_HELIX_BEHAVIOUR": "1",
+        }
+        if along_f is not None:
+            env["UDRONE_SWIM_ALONG"] = str(along_f)
+        if depth is not None and depth != "":
+            env["UDRONE_SWIM_DEPTH"] = str(float(depth))
+        meta = {
+            "north_m": north, "east_m": east, "relative_to": rel,
+            "speed_mps": speed, "arrive_m": arrive,
+        }
+        if along_f is not None:
+            meta["along_heading_m"] = along_f
+        if depth is not None and depth != "":
+            meta["depth_m"] = float(depth)
+        self._spawn_auv("swim", cmd["id"], runner, env, meta, "/tmp/coral_swim.log")
+
+    def _start_hoop(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "hoop rejected: xudrone is latched; detach first"})
+            return
+        runner = os.environ.get(
+            "UDRONE_HOOP_RUNNER",
+            "/root/udrone_boat/behaviours/run_hoop.py",
+        )
+        if not os.path.isfile(runner):
+            here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_hoop.py")
+            if not os.path.isfile(here):
+                self._emit({"type": "rejected", "id": cmd["id"],
+                            "reason": f"hoop runner not found ({runner})"})
+                return
+            runner = here
+        env = {
+            **os.environ,
+            "GZ_PARTITION": os.environ.get("GZ_PARTITION", "aquatic"),
+            "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "84"),
+            "UDRONE_GZ_MODEL": self.auv_model,
+            "UDRONE_PX4_INSTANCE": str(self.auv_px4),
+            "UDRONE_HELIX_BEHAVIOUR": "1",
+        }
+        self._spawn_auv("hoop", cmd["id"], runner, env, {}, "/tmp/coral_hoop.log")
+
     def _start_coverage(self, cmd):
         width = float(cmd.get("width_m", os.environ.get("UDRONE_COV_WIDTH", "12")))
         length = float(cmd.get("length_m", cmd.get("width_m",
@@ -964,7 +1096,7 @@ class CoralBehaviours(Node):
             self._tick_dock()
         elif self.phase in ("goto", "survey"):
             self._tick_goto()
-        elif self.phase in ("helix", "coverage", "approach"):
+        elif self.phase in ("helix", "swim", "hoop", "coverage", "approach"):
             self._tick_auv()
 
     def destroy_node(self):

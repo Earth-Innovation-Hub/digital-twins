@@ -17,25 +17,29 @@ WORLD=${PX4_GZ_WORLD:-kiwanis_lake}
 MODEL=${GZ_MODEL_NAME:-}
 if [ -z "$MODEL" ]; then
   # CoRAL dual spawn uses xudrone_1; solo SITL uses xudrone_0.
-  # start_boat can launch this before xudrone_1 exists — wait when heron is up.
-  MODEL=xudrone_0
-  for _ in $(seq 1 40); do
+  # Never lock onto a default that is not in the world yet — wait for a real model.
+  MODEL=
+  for _ in $(seq 1 90); do
     listed=$(gz model --list 2>/dev/null || true)
     if echo "$listed" | grep -q "xudrone_1"; then
       MODEL=xudrone_1
       break
     fi
     if echo "$listed" | grep -q "heron_0"; then
+      # Boat up: keep waiting for secondary AUV (do not fall through to xudrone_0).
       sleep 2
       continue
     fi
-    # No boat yet / solo world — accept xudrone_0 if present.
     if echo "$listed" | grep -q "xudrone_0"; then
       MODEL=xudrone_0
       break
     fi
     sleep 2
   done
+fi
+if [ -z "$MODEL" ]; then
+  echo "$(date -u +%FT%TZ) xudrone front camera bridge: no xudrone_* model yet; exiting" >&2
+  exit 1
 fi
 CAM=/world/$WORLD/model/$MODEL/link/front_camera_link/sensor/front_camera
 echo "$(date -u +%FT%TZ) xudrone front camera bridge MODEL=$MODEL CAM=$CAM"

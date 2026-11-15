@@ -26,7 +26,9 @@ Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airfra
 Kiwanis Lake bed + shoreline in Gazebo Sim; entities `heron_0` (yellow ASV) and
 `xudrone_1` (AUV). A white **0.50 m cube** at ~ENU (5 E, 4 N, centre z≈−1.83)
 carries **AprilTag 36h11 id 0** (0.40 m) on **all six faces** so front, nadir, and
-side views can lock for survey stop and `approach_tag`.
+side views can lock for survey stop and `approach_tag`. A **1 m vertical orange
+ring** (tube radius 0.045 m, 12 segments) sits at ENU (6, 0, −1), opening along
+east-west. It has no AprilTags; `hoop` finds it with the front camera.
 
 ![Kiwanis Lake CoRAL twin in Gazebo](docs/img/kiwanis_gazebo.png)
 
@@ -46,7 +48,7 @@ side views can lock for survey stop and `approach_tag`.
 | `adapter/udrone_thrust_adapter.cpp` | `/usr/local/bin/udrone_thrust_adapter` | PX4 ESC → Gazebo thrust |
 | `plugin/LinkAttacher.*` | `…/gz-sim-8/plugins/` | dock latch |
 | `scripts/dock_command.py` | `/usr/local/bin/dock_command.py` | ATTACH / DETACH / STATE |
-| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / goto / survey / helix / coverage / approach_tag + tags |
+| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / goto / survey / helix / swim / hoop / coverage / approach_tag + tags |
 | `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | front camera → `/xudrone/camera/*` |
 | `*_down_camera_bridge.sh` | `/usr/local/bin/…` | nadir cameras → `/otter_k|xudrone/camera_down/*` |
 | `xudrone_range_bridge.sh` | `/usr/local/bin/…` | EchoRanger + surface beam → `/xudrone/range/{bottom,surface}` |
@@ -140,7 +142,7 @@ and emits events.
 | topic | direction | payload |
 |---|---|---|
 | `/coral/command` | in | JSON `std_msgs/String` |
-| `/coral/event` | out | accepted / arrived / dock_done / helix_done / coverage_done / approach_done / survey_done / failed / rejected / aborted |
+| `/coral/event` | out | accepted / arrived / dock_done / helix_done / swim_done / hoop_done / coverage_done / approach_done / survey_done / failed / rejected / aborted |
 | `/coral/status` | out | ~1 Hz: busy, phase, latch, boat/auv pose |
 | `/coral/detections` | out | settled AprilTag ENU records |
 | `/coral/tracks` | out | ~2 Hz live ENU while a tag is in view (coverage / logging) |
@@ -153,6 +155,8 @@ Commands:
 {"type":"goto","east_m":..,"north_m":..,"relative_to":"current"|"world"|"heading","id"?}
 {"type":"survey","width_m":20,"length_m":20,"until"?: "tag_detected","id"?}
 {"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
+{"type":"swim","north_m"?, "east_m"?, "along_heading_m"?, "relative_to":"current"|"world"|"heading", "depth_m"?, "speed_mps"?, "arrive_m"?, "id"?}
+{"type":"hoop","id"?}
 {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "until"?: "tag_detected","id"?}
 {"type":"approach_tag","tag_id"?, "standoff_m"?, "tag_size_m"?, "settle_s"?, "timeout_s"?, "acquire_s"?, "search_budget_s"?, "search_r0_m"?, "search_r_max_m"?, "center_east_m"?, "center_north_m"?, "id"?}
 {"type":"hold"|"abort","id"?}
@@ -162,6 +166,8 @@ Commands:
 |---|---|---|
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
+| `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
+| `hoop` | xudrone | front-camera search for the orange ring, then a forward sweep through the opening. The authored (6, 0) coordinate is not a steering target. Rejected while latched. Debug image: `/xudrone/hoop_debug/image` |
 | `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected` |
 | `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
 | `dock` | latch | boat-nest ATTACH/DETACH (gates 0.6 m / 30°) — not bed-tag geometry |
@@ -185,6 +191,8 @@ docker exec digital-twin-aquatic coral_cmd.py status
 docker exec digital-twin-aquatic coral_cmd.py dock detach
 docker exec digital-twin-aquatic coral_cmd.py goto --along 8
 docker exec digital-twin-aquatic coral_cmd.py helix --duration 20 --radius 0.4
+docker exec digital-twin-aquatic coral_cmd.py swim --north 10
+docker exec digital-twin-aquatic coral_cmd.py hoop
 docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --layers 3
 docker exec digital-twin-aquatic coral_cmd.py approach_tag --standoff 1.5 --east 5 --north 4 --world
 docker exec digital-twin-aquatic coral_cmd.py dock attach

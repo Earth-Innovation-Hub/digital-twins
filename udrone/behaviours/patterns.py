@@ -75,6 +75,46 @@ def path_length_3d(points: list) -> float:
     return sum(math.dist(a, b) for a, b in zip(points, points[1:]))
 
 
+def world_offset_to_path(de: float, dn: float, yaw: float) -> tuple:
+    """World east/north offset → path frame (forward, left) at heading yaw.
+
+    Gazebo yaw 0 points along +X, and +X is east. Path x is forward along yaw,
+    path y is to the left. This is the inverse of the helix controller's
+    path-frame rotation.
+    """
+    c, s = math.cos(yaw), math.sin(yaw)
+    return (c * de + s * dn, -s * de + c * dn)
+
+
+def swim_path_end(
+    yaw: float,
+    relative_to: str,
+    north_m: float = 0.0,
+    east_m: float = 0.0,
+    along_heading_m: Optional[float] = None,
+    x0: float = 0.0,
+    y0: float = 0.0,
+) -> tuple:
+    """End point (forward, left) of one straight leg in the thrust-on path frame.
+
+    relative_to:
+      current — north_m / east_m are an ENU offset from the arm pose
+      world   — north_m / east_m are absolute ENU; x0, y0 are the arm pose
+      heading — along_heading_m (or north_m) is forward, east_m is starboard
+    """
+    rel = (relative_to or "current").lower()
+    if rel == "absolute":
+        rel = "world"
+    if rel == "heading":
+        fwd = float(along_heading_m if along_heading_m is not None else north_m)
+        return (fwd, -float(east_m))
+    if rel == "world":
+        de, dn = float(east_m) - float(x0), float(north_m) - float(y0)
+    else:
+        de, dn = float(east_m), float(north_m)
+    return world_offset_to_path(de, dn, yaw)
+
+
 def polyline_pos_vel(waypoints: list, speed_mps: float, t: float):
     """Constant-speed interpolation along a 3D polyline.
 

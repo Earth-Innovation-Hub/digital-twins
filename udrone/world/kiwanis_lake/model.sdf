@@ -192,6 +192,34 @@
         </material>
       </visual>
 
+      <!-- Vertical hula hoop, 1 m opening, centre ENU (6, 0, -1).
+           Axis is east-west. Tube radius 0.045 m. Orange ring only;
+           the search reads it with the front camera. -->
+      <visual name="hoop_seg_0"><pose>6 0.000 -0.500 -1.5708 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_0"><pose>6 0.000 -0.500 -1.5708 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_1"><pose>6 0.250 -0.567 -2.0944 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_1"><pose>6 0.250 -0.567 -2.0944 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_2"><pose>6 0.433 -0.750 -2.6180 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_2"><pose>6 0.433 -0.750 -2.6180 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_3"><pose>6 0.500 -1.000 -3.1416 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_3"><pose>6 0.500 -1.000 -3.1416 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_4"><pose>6 0.433 -1.250 -3.6652 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_4"><pose>6 0.433 -1.250 -3.6652 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_5"><pose>6 0.250 -1.433 -4.1888 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_5"><pose>6 0.250 -1.433 -4.1888 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_6"><pose>6 0.000 -1.500 -4.7124 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_6"><pose>6 0.000 -1.500 -4.7124 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_7"><pose>6 -0.250 -1.433 -5.2360 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_7"><pose>6 -0.250 -1.433 -5.2360 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_8"><pose>6 -0.433 -1.250 -5.7596 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_8"><pose>6 -0.433 -1.250 -5.7596 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_9"><pose>6 -0.500 -1.000 -6.2832 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_9"><pose>6 -0.500 -1.000 -6.2832 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_10"><pose>6 -0.433 -0.750 -6.8068 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_10"><pose>6 -0.433 -0.750 -6.8068 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+      <visual name="hoop_seg_11"><pose>6 -0.250 -0.567 -7.3304 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <collision name="hoop_seg_11"><pose>6 -0.250 -0.567 -7.3304 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
+
       <!-- ---- Lake props (visual; keep clear of spawn 0,0) ---- -->
       <!-- Bottom: rocks / debris on the depth dish -->
       <visual name="rock_a">

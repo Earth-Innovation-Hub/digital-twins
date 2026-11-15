@@ -8,6 +8,8 @@ Examples:
   coral_cmd.py goto --east 8 --north 0
   coral_cmd.py goto --east 1.5 --north 2.0 --world
   coral_cmd.py helix --duration 20 --radius 0.4
+  coral_cmd.py swim --north 10
+  coral_cmd.py hoop
   coral_cmd.py coverage --width 12 --length 12 --layers 3
   coral_cmd.py approach_tag --standoff 1.5 --timeout 60
   coral_cmd.py survey --width 20 --length 20 --until tag_detected
@@ -30,8 +32,9 @@ CMD = "/coral/command"
 EVT = "/coral/event"
 STS = "/coral/status"
 TERMINAL = {
-    "arrived", "dock_done", "helix_done", "coverage_done", "approach_done",
-    "survey_done", "failed", "rejected", "aborted",
+    "arrived", "dock_done", "helix_done", "swim_done", "hoop_done",
+    "coverage_done", "approach_done", "survey_done", "failed", "rejected",
+    "aborted",
 }
 
 
@@ -66,8 +69,8 @@ def spin_for(node, seconds):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Send a CoRAL behaviour command")
     p.add_argument("type", choices=(
-        "dock", "goto", "helix", "coverage", "approach_tag", "survey",
-        "abort", "hold", "status",
+        "dock", "goto", "helix", "swim", "hoop", "coverage", "approach_tag",
+        "survey", "abort", "hold", "status",
     ))
     p.add_argument("action", nargs="?", help="attach|detach for dock")
     p.add_argument("--east", type=float, default=0.0)
@@ -115,7 +118,7 @@ def main(argv=None):
     p.add_argument("--search-rmax", type=float, default=None, dest="search_r_max",
                    help="approach_tag search_r_max_m")
     p.add_argument("--depth", type=float, default=None,
-                   help="approach_tag depth_m (legacy/meta)")
+                   help="swim: metres below the surface. approach_tag: depth_m")
     p.add_argument("--id", default=None)
     p.add_argument("--wait", type=float, default=180.0,
                    help="seconds to wait for a terminal event")
@@ -172,6 +175,27 @@ def main(argv=None):
         for val, key in mapping:
             if val is not None:
                 cmd[key] = val
+    elif args.type == "swim":
+        if args.along is not None:
+            cmd["along_heading_m"] = args.along
+            cmd["relative_to"] = "heading"
+        else:
+            cmd["east_m"] = args.east
+            cmd["north_m"] = args.north
+            if args.world:
+                cmd["relative_to"] = "world"
+            elif args.heading:
+                cmd["relative_to"] = "heading"
+            else:
+                cmd["relative_to"] = "current"
+        if args.depth is not None:
+            cmd["depth_m"] = args.depth
+        if args.speed is not None:
+            cmd["speed_mps"] = args.speed
+        if args.arrive is not None:
+            cmd["arrive_m"] = args.arrive
+    elif args.type == "hoop":
+        pass
     elif args.type == "survey":
         if args.width is None or args.length is None:
             print("survey requires --width and --length", file=sys.stderr)

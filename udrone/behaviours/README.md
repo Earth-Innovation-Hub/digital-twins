@@ -7,11 +7,20 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 |---|---|---|
 | (in-process) | `dock`, `goto`, `survey`, `hold`, `abort` | boat + latch |
 | `run_helix.py` | `helix` | AUV forward helix |
+| `run_swim.py` | `swim` | AUV straight leg (compass, world, or along heading) |
+| `run_hoop.py` | `hoop` | Front-camera search, then a forward sweep through the orange ring |
 | `run_coverage.py` | `coverage` | AUV 3D lawnmower (`patterns.volume_lawnmower`) |
 | `run_approach_tag.py` | `approach_tag` | Expanding spiral search → front-cam IBVS rates |
 | `run_tags.sh` | (launch) | apriltag_ros + `tag_detector` for otter_k / xudrone |
 
-Helix and coverage share `UdroneHelixController` (force → point-hull-axis).
+Helix, swim, hoop, and coverage share `UdroneHelixController` (force → point-hull-axis).
+`swim` is one polyline leg. `hoop` (`hoop_geom.py`) covers a 2 m dock-centred
+grid until the front camera's orange pixels form a ring, then flies a forward
+sweep to a standoff and, once three centre fixes agree, freezes the line
+through the opening. Pitch from `rpy_from_q` is positive nose-down.
+`/xudrone/hoop_debug/image` overlays the ring, any AprilTag, and the command
+arrow; tags on that image are not used for steering. The pass is scored
+against the estimated centre, not the authored (6, 0, −1) pose.
 `approach_tag` subclasses the same offboard path: **search** = attitude-rate
 expanding spiral around an ENU seed / last lock until `/xudrone/detections`
 locks, then IBVS pitch/yaw/surge into `VehicleRatesSetpoint`; lost track
