@@ -6,12 +6,18 @@ from hoop_geom import (
     RING_OUTER_M,
     SEARCH_HITS,
     CoverageMap,
+    debug_caption,
     horizontal_axis,
     in_opening,
     level_feature,
+    localizer_shift,
+    fly_trajectory,
     look_leg,
+    look_step,
     orange_ring,
     ring_center,
+    slew_toward,
+    sideways_baseline,
     sweep_points,
     through_ends,
 )
@@ -56,6 +62,50 @@ def main():
     assert all(along[i] <= along[i + 1] + 1e-9 for i in range(len(along) - 1)), along
     assert sweep[-1][0] > 6.0 and sweep[2][0] < 6.0
     assert abs(sweep[1][2] - (-0.8)) < abs(-1.0 - (-0.8))
+    # The rollout, the opening, and the exit are one level line. The descent
+    # is mostly done on the intercept leg and has not overshot the ring depth.
+    assert abs(sweep[2][2] - sweep[3][2]) < 1e-9 and abs(sweep[3][2] - sweep[4][2]) < 1e-9
+    assert abs(sweep[1][2] - sweep[2][2]) < abs(sweep[1][2] - (-0.8))
+    leg_out = (sweep[4][0] - sweep[2][0], sweep[4][1] - sweep[2][1])
+    leg_mid = (sweep[3][0] - sweep[2][0], sweep[3][1] - sweep[2][1])
+    assert abs(leg_out[0] * leg_mid[1] - leg_out[1] * leg_mid[0]) < 1e-6
+
+    # Lined up on the ring: the planned pass is straight, level after the join,
+    # and finishes past the opening. A nose pointed off the line still joins it.
+    planned, pax = fly_trajectory((2.0, 0.0, -0.8), (1.0, 0.0), (6.0, 0.0, -1.0), through=True)
+    assert math.dist(planned[0], (2.0, 0.0, -0.8)) < 1e-6
+    assert planned[-1][0] > 6.0 and abs(planned[-1][1]) < 0.05
+    assert abs(planned[-1][2] - planned[-2][2]) < 1e-9
+    palong = [(p[0] - 2.0) * pax[0] + p[1] * pax[1] for p in planned]
+    assert palong[-1] > palong[0] + 4.0
+    assert min(palong) > -0.4
+    turned, tax = fly_trajectory((2.0, 1.5, -0.8), (0.0, 1.0), (6.0, 0.0, -1.0), through=True)
+    assert turned[-1][0] > 6.0
+    assert any(math.hypot(p[0] - 6.0, p[1]) < 0.2 for p in turned)
+    talong = [(p[0] - 2.0) * tax[0] + (p[1] - 1.5) * tax[1] for p in turned]
+    assert min(talong) > -0.5 and talong[-1] > 4.0
+    hold, _hax = fly_trajectory((2.0, 0.4, -0.8), (1.0, 0.0), (6.0, 0.0, -1.0), through=False)
+    assert hold[-1][0] < 6.0
+    cap = debug_caption("search", "lead", 20, 3.4, (6.0, 0.1, -1.0), 0.55, 9.0, False, False)
+    assert cap[0].startswith("search lead") and "3.4" in cap[0] and "6.0" in cap[1]
+    assert len(cap) == 2
+    passed = debug_caption("through", None, 40, 1.2, (6.0, 0.0, -1.0), 0.5, 0.8, True, False)
+    assert "surround 1" in passed[-1] and "opening 0" in passed[-1]
+    step, _sax = look_step((2.0, 0.0, -0.8), (6.0, 0.0, -1.0))
+    assert math.dist(step[0], (2.0, 0.0, -0.8)) < 1e-6
+    assert 1.0 < math.dist(step[0], step[-1]) < 1.8
+    assert abs(step[-1][2] - (-0.8)) < 1e-9
+
+    # A ring just right of the axis slides the line that way. A large error
+    # means the nose is still turning, so the line is held. Inside 4 m it freezes.
+    shift, freeze = localizer_shift(0.10, 0.0, 6.0, (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    assert shift is not None and shift[1] < -0.15 and not freeze, shift
+    held, still = localizer_shift(0.50, 0.0, 6.0, (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    assert held is None and not still
+    frozen, locked = localizer_shift(0.05, 0.0, 3.0, (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+    assert frozen is None and locked
+    stepped = slew_toward((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), 0.08, 0.1)
+    assert abs(stepped[0] - 0.008) < 1e-9
 
     # rpy pitch is positive nose-down, which puts a same-depth target above
     # the optical axis. Levelling brings that vertical error back to zero.
@@ -73,6 +123,7 @@ def main():
     grid.mark_wedge(2.0, 0.0, 0.0, -1.0, 0.0)
     assert grid.hits.get(hoop_cell) == 1, grid.hits
     assert grid.hits.get((2, 0)) == 1  # centre (5, 1), 3 m ahead
+    assert grid.hits.get((3, 1)) == 1  # about 31° off the nose, inside the camera view
     assert grid.hits.get((1, 0), 0) == 0  # centre (3, 1) is inside the near cutoff
     grid.mark_wedge(2.0, 0.0, 0.0, -2.2, 1.0)  # a bed view drops the look timer
     grid.mark_wedge(2.0, 0.0, 0.0, -1.0, 1.2)
@@ -113,6 +164,16 @@ def _orange_ellipse():
     assert 110 < hit["major"] < 150, hit
     assert hit["aspect"] > 0.6, hit
     assert hit["closed"], hit
+    assert not sideways_baseline([0.0, 0.2])
+    assert sideways_baseline([0.0, 0.2, 0.55])
+
+    # A tilted ring's major axis is the ellipse, which is shorter than the upright box.
+    tilted = np.zeros((480, 640, 3), np.uint8)
+    cv2.ellipse(tilted, (320, 240), (80, 25), 55, 0, 360, (20, 90, 230), thickness=5)
+    spun = orange_ring(tilted)
+    assert spun is not None, spun
+    assert abs(spun["major"] - 160) < 30, spun
+    assert spun["major"] > max(spun["w"], spun["h"]), spun
 
     # A limb without the rest of the ring is still a bearing, not a lock.
     limb = np.zeros((480, 640, 3), np.uint8)

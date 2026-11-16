@@ -32,6 +32,10 @@ Commands:
   {"type":"hoop","id"?}
       Search for the 1 m orange hula hoop with the front camera and swim
       through the opening. Rejected while the latch is attached.
+  {"type":"track","duration_s"?, "standoff_m"?, "id"?}
+      Hold under otter_k: the upward camera watches AprilTag 10 on the
+      underside of the deck, and the force loop keeps a metre below it.
+      Rejected while the latch is attached. Phrase: xudrone: track otter_k.
   {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?,
    "z_top"?, "z_bottom"?, "speed_mps"?, "heading_deg"?,
    "center_east_m"?, "center_north_m"?, "until"?: "tag_detected", "id"?}
@@ -44,7 +48,7 @@ Commands:
 
 Events:
   {"type":"accepted"|"rejected"|"failed"|"arrived"|"survey_done"|"dock_done"|
-   "helix_done"|"swim_done"|"hoop_done"|"coverage_done"|"aborted", "id", ...}
+   "helix_done"|"swim_done"|"hoop_done"|"track_done"|"coverage_done"|"aborted", "id", ...}
 
 Status (1 Hz): busy, phase, latch, boat/auv pose, active_id, last_event.
 
@@ -329,6 +333,8 @@ class CoralBehaviours(Node):
             self._start_swim(cmd)
         elif kind == "hoop":
             self._start_hoop(cmd)
+        elif kind == "track":
+            self._start_track(cmd)
         elif kind == "coverage":
             self._start_coverage(cmd)
         elif kind in ("approach_tag", "approach"):
@@ -864,6 +870,36 @@ class CoralBehaviours(Node):
         }
         self._spawn_auv("hoop", cmd["id"], runner, env, {}, "/tmp/coral_hoop.log")
 
+    def _start_track(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "track rejected: xudrone is latched; detach first"})
+            return
+        runner = os.environ.get(
+            "UDRONE_TRACK_RUNNER",
+            "/root/udrone_boat/behaviours/run_track_otter.py",
+        )
+        if not os.path.isfile(runner):
+            here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_track_otter.py")
+            if not os.path.isfile(here):
+                self._emit({"type": "rejected", "id": cmd["id"],
+                            "reason": f"track runner not found ({runner})"})
+                return
+            runner = here
+        env = {
+            **os.environ,
+            "GZ_PARTITION": os.environ.get("GZ_PARTITION", "aquatic"),
+            "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "84"),
+            "UDRONE_GZ_MODEL": self.auv_model,
+            "UDRONE_PX4_INSTANCE": str(self.auv_px4),
+            "UDRONE_HELIX_BEHAVIOUR": "1",
+        }
+        if cmd.get("duration_s") not in (None, ""):
+            env["UDRONE_TRACK_DURATION"] = str(float(cmd["duration_s"]))
+        if cmd.get("standoff_m") not in (None, ""):
+            env["UDRONE_TRACK_STANDOFF"] = str(float(cmd["standoff_m"]))
+        self._spawn_auv("track", cmd["id"], runner, env, {}, "/tmp/coral_track.log")
+
     def _start_coverage(self, cmd):
         width = float(cmd.get("width_m", os.environ.get("UDRONE_COV_WIDTH", "12")))
         length = float(cmd.get("length_m", cmd.get("width_m",
@@ -999,7 +1035,7 @@ class CoralBehaviours(Node):
             "UDRONE_APPROACH_DET_TOPIC": os.environ.get(
                 "UDRONE_APPROACH_DET_TOPIC", "/xudrone/detections"),
             "UDRONE_APPROACH_INFO_TOPIC": os.environ.get(
-                "UDRONE_APPROACH_INFO_TOPIC", "/xudrone/camera/camera_info"),
+                "UDRONE_APPROACH_INFO_TOPIC", "/xudrone/camera_front/camera_info"),
             "UDRONE_GZ_MODEL": self.auv_model,
             "UDRONE_PX4_INSTANCE": str(self.auv_px4),
         }
@@ -1096,7 +1132,7 @@ class CoralBehaviours(Node):
             self._tick_dock()
         elif self.phase in ("goto", "survey"):
             self._tick_goto()
-        elif self.phase in ("helix", "swim", "hoop", "coverage", "approach"):
+        elif self.phase in ("helix", "swim", "hoop", "track", "coverage", "approach"):
             self._tick_auv()
 
     def destroy_node(self):

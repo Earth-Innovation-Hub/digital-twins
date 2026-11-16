@@ -60,6 +60,17 @@ start_camera_bridge() {
   (
     setsid bash -c '
       for _ in $(seq 1 90); do
+        if gz topic -l 2>/dev/null | grep -q "$0.*up_camera/image"; then
+          break
+        fi
+        sleep 1
+      done
+      GZ_MODEL_NAME="$0" exec /usr/local/bin/xudrone_up_camera_bridge.sh
+    ' "$1" >> /root/log/xudrone_up_camera.log 2>&1 < /dev/null &
+  )
+  (
+    setsid bash -c '
+      for _ in $(seq 1 90); do
         if gz topic -l 2>/dev/null | grep -q "$0.*lidar_sensor_link.*lidar/scan"; then
           break
         fi
@@ -162,6 +173,7 @@ rm -f /root/.sim_hold
 pkill -f '^/usr/local/bin/udrone_thrust_adapter' 2>/dev/null || true
 pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/null || true
 pkill -f 'xudrone_down_camera_bridge|xudrone.*/down_camera' 2>/dev/null || true
+pkill -f 'xudrone_up_camera_bridge|xudrone.*/up_camera' 2>/dev/null || true
 pkill -f 'apriltag_node|tag_detector|run_tags' 2>/dev/null || true
 sleep 1
 

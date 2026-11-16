@@ -31,6 +31,7 @@ copy_in "$HERE/start_boat.sh"                     $N/start_boat.sh
 copy_in "$HERE/stop_sim.sh"                       $N/stop_sim.sh
 copy_in "$HERE/xudrone_camera_bridge.sh"          $N/xudrone_camera_bridge.sh
 copy_in "$HERE/xudrone_down_camera_bridge.sh"     $N/xudrone_down_camera_bridge.sh
+copy_in "$HERE/xudrone_up_camera_bridge.sh"       $N/xudrone_up_camera_bridge.sh
 copy_in "$HERE/xudrone_range_bridge.sh"           $N/xudrone_range_bridge.sh
 copy_in "$HERE/otter_k_down_camera_bridge.sh"     $N/otter_k_down_camera_bridge.sh
 copy_in "$HERE/scripts/dock_command.py"           $N/dock_command.py
@@ -39,6 +40,8 @@ copy_in "$HERE/model/xudrone/model.sdf"           $N/xudrone_model.sdf
 copy_in "$HERE/model/xudrone/model.config"        $N/xudrone_model.config
 copy_in "$HERE/model/heron/model.sdf"             $N/heron_model.sdf
 copy_in "$HERE/model/heron/model.config"          $N/heron_model.config
+copy_in "$HERE/model/heron/meshes/tag_plane.obj"  $N/tag_plane.obj
+copy_in "$HERE/model/heron/materials/textures/apriltag36h11_10.png" $N/apriltag36h11_10.png
 copy_in "$HERE/world/kiwanis_lake.sdf"            $N/kiwanis_lake.sdf
 for f in "$HERE"/test/*.py "$HERE"/test/*.sh; do
   if [ -f "$f" ]; then copy_in "$f" "$N/test/$(basename "$f")"; fi

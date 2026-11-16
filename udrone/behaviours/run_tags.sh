@@ -23,8 +23,9 @@ trap cleanup EXIT
 
 wait_topic() {
   local topic=$1
-  for _ in $(seq 1 90); do
-    if ros2 topic list 2>/dev/null | grep -qx "$topic"; then
+  # `ros2 topic list` does not return in this container. A short hz sample does.
+  for _ in $(seq 1 30); do
+    if timeout 5 ros2 topic hz "$topic" --window 5 2>&1 | grep -q "average rate"; then
       return 0
     fi
     sleep 1
@@ -74,8 +75,8 @@ case "$VEHICLE" in
     # FRONT camera → /xudrone/detections (until-stop). During pitched coverage the
     # bed tag appears "in front"; otter-style nadir geometry does not apply here,
     # so this stream is for raw stop only (TF isolated).
-    wait_topic /xudrone/camera/image || true
-    start_apriltag /xudrone_front /xudrone/camera/image /xudrone/camera/camera_info \
+    wait_topic /xudrone/camera_front/image || true
+    start_apriltag /xudrone_front /xudrone/camera_front/image /xudrone/camera_front/camera_info \
       -r detections:=/xudrone/detections \
       -r /tf:=/xudrone/tf_front
 
@@ -103,6 +104,16 @@ case "$VEHICLE" in
     else
       echo "coral_tags(xudrone): camera_down missing; front-only until-stop" \
         >> /root/log/coral_tags.log
+    fi
+
+    # UP camera → /xudrone/detections_up. AprilTag 10 under the Heron deck.
+    # TF is isolated so it does not fight the down-camera tree.
+    if wait_topic /xudrone/camera_up/image; then
+      start_apriltag /xudrone_up /xudrone/camera_up/image /xudrone/camera_up/camera_info \
+        -r detections:=/xudrone/detections_up \
+        -r /tf:=/xudrone/tf_up
+    else
+      echo "coral_tags(xudrone): camera_up missing" >> /root/log/coral_tags.log
     fi
     ;;
   *)

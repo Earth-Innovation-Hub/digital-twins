@@ -99,7 +99,7 @@ class UdroneApproachController(UdroneHelixController):
         search_r_max_m=8.0,
         tag_size_m=0.4,
         detections_topic="/xudrone/detections",
-        camera_info_topic="/xudrone/camera/camera_info",
+        camera_info_topic="/xudrone/camera_front/camera_info",
         bottom_range_topic="/xudrone/range/bottom",
         surface_range_topic="/xudrone/range/surface",
         center_east_m=None,
@@ -651,7 +651,7 @@ def main():
     search_r_max = float(os.environ.get("UDRONE_APPROACH_SEARCH_RMAX", "8.0"))
     tag_size = float(os.environ.get("UDRONE_APPROACH_TAG_SIZE", "0.4"))
     det_topic = os.environ.get("UDRONE_APPROACH_DET_TOPIC", "/xudrone/detections")
-    info_topic = os.environ.get("UDRONE_APPROACH_INFO_TOPIC", "/xudrone/camera/camera_info")
+    info_topic = os.environ.get("UDRONE_APPROACH_INFO_TOPIC", "/xudrone/camera_front/camera_info")
     ce = os.environ.get("UDRONE_APPROACH_CENTER_E")
     cn = os.environ.get("UDRONE_APPROACH_CENTER_N")
     center_e = float(ce) if ce not in (None, "") else None

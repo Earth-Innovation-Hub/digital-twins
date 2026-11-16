@@ -10,6 +10,7 @@ Examples:
   coral_cmd.py helix --duration 20 --radius 0.4
   coral_cmd.py swim --north 10
   coral_cmd.py hoop
+  coral_cmd.py track --duration 90 --standoff 1
   coral_cmd.py coverage --width 12 --length 12 --layers 3
   coral_cmd.py approach_tag --standoff 1.5 --timeout 60
   coral_cmd.py survey --width 20 --length 20 --until tag_detected
@@ -32,7 +33,7 @@ CMD = "/coral/command"
 EVT = "/coral/event"
 STS = "/coral/status"
 TERMINAL = {
-    "arrived", "dock_done", "helix_done", "swim_done", "hoop_done",
+    "arrived", "dock_done", "helix_done", "swim_done", "hoop_done", "track_done",
     "coverage_done", "approach_done", "survey_done", "failed", "rejected",
     "aborted",
 }
@@ -69,7 +70,7 @@ def spin_for(node, seconds):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Send a CoRAL behaviour command")
     p.add_argument("type", choices=(
-        "dock", "goto", "helix", "swim", "hoop", "coverage", "approach_tag",
+        "dock", "goto", "helix", "swim", "hoop", "track", "coverage", "approach_tag",
         "survey", "abort", "hold", "status",
     ))
     p.add_argument("action", nargs="?", help="attach|detach for dock")
@@ -196,6 +197,11 @@ def main(argv=None):
             cmd["arrive_m"] = args.arrive
     elif args.type == "hoop":
         pass
+    elif args.type == "track":
+        if args.duration is not None:
+            cmd["duration_s"] = args.duration
+        if args.standoff is not None:
+            cmd["standoff_m"] = args.standoff
     elif args.type == "survey":
         if args.width is None or args.length is None:
             print("survey requires --width and --length", file=sys.stderr)
@@ -303,7 +309,10 @@ def main(argv=None):
     ok = True
     if terminal.get("type") in ("failed", "rejected"):
         ok = False
-    if terminal.get("type") in ("helix_done", "coverage_done", "approach_done") and terminal.get("failed"):
+    if terminal.get("type") in (
+        "helix_done", "swim_done", "hoop_done", "track_done",
+        "coverage_done", "approach_done",
+    ) and terminal.get("failed"):
         ok = False
     if terminal.get("type") == "approach_done" and not terminal.get("arrived", True):
         ok = False

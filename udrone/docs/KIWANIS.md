@@ -13,14 +13,18 @@ on Tempe Town Lake is a different world and container.
   (shore ~1 m → centre 2.44 m) with tiled silt/sand albedo
   (`materials/textures/bed_sand.png`, ~8 m/tile); park mesh with lake hole; west
   pier stub; AprilTag 36h11 id 0 (0.40 m) on all six faces of a 0.50 m
-  cube at ENU (5 E, 4 N, centre z≈−1.83); water uses classic transparency
+  cube at ENU (5 E, 4 N, centre z≈−1.83); AprilTag 36h11 id 10 (0.40 m)
+  centered on the underside of the Heron deck, facing down; water uses classic transparency
   (no PBR) so the down-camera can see the bed/tag; static bottom
   debris and surface floats clear of the `0,0` spawn. Regenerate textures/UVs
   with `python3 mk_bed_texture.py` in this model folder.
 - Sensors / perception: otter_k nadir (`/otter_k/camera_down/*`); xudrone front
-  (`/xudrone/camera/*`, primary until-stop while pitched) + nadir
-  (`/xudrone/camera_down/*`). `apriltag_ros` + `tag_detector` →
-  `/coral/detections` and `/coral/tracks`. Boat `survey` / AUV `coverage` can
+  (`/xudrone/camera_front/*`, primary until-stop while pitched), nadir
+  (`/xudrone/camera_down/*`), and upward (`/xudrone/camera_up/*`, pitched −90°
+  on the hull crown so it sees tag 10 under the deck). `apriltag_ros` + `tag_detector` →
+  `/coral/detections` and `/coral/tracks`. The upward camera publishes
+  `/xudrone/detections_up` (tag 10). `track` holds a metre under otter_k
+  (`xudrone: track otter_k`; detach first). Boat `survey` / AUV `coverage` can
   stop on `until: tag_detected`; `approach_tag` front-cam IBVS (attitude rates
   + thrust) to the tag. Screenshots: [img/](img/).
 - Collision: tiled bed boxes + bank walls; park AABB slab visuals (ODE triangle-mesh

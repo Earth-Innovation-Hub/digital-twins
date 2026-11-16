@@ -26,7 +26,9 @@ Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airfra
 Kiwanis Lake bed + shoreline in Gazebo Sim; entities `heron_0` (yellow ASV) and
 `xudrone_1` (AUV). A white **0.50 m cube** at ~ENU (5 E, 4 N, centre z≈−1.83)
 carries **AprilTag 36h11 id 0** (0.40 m) on **all six faces** so front, nadir, and
-side views can lock for survey stop and `approach_tag`. A **1 m vertical orange
+side views can lock for survey stop and `approach_tag`. **AprilTag 36h11 id 10**
+(0.40 m) is centered on the underside of the Heron deck, facing down, for the
+upward camera. A **1 m vertical orange
 ring** (tube radius 0.045 m, 12 segments) sits at ENU (6, 0, −1), opening along
 east-west. It has no AprilTags; `hoop` finds it with the front camera.
 
@@ -48,9 +50,10 @@ east-west. It has no AprilTags; `hoop` finds it with the front camera.
 | `adapter/udrone_thrust_adapter.cpp` | `/usr/local/bin/udrone_thrust_adapter` | PX4 ESC → Gazebo thrust |
 | `plugin/LinkAttacher.*` | `…/gz-sim-8/plugins/` | dock latch |
 | `scripts/dock_command.py` | `/usr/local/bin/dock_command.py` | ATTACH / DETACH / STATE |
-| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / goto / survey / helix / swim / hoop / coverage / approach_tag + tags |
-| `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | front camera → `/xudrone/camera/*` |
+| `behaviours/` | `/root/udrone_boat/behaviours/` + `/usr/local/bin/coral_*.sh|py` | dock / goto / survey / helix / swim / hoop / track / coverage / approach_tag + tags |
+| `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | front camera → `/xudrone/camera_front/*` |
 | `*_down_camera_bridge.sh` | `/usr/local/bin/…` | nadir cameras → `/otter_k|xudrone/camera_down/*` |
+| `xudrone_up_camera_bridge.sh` | `/usr/local/bin/…` | upward camera → `/xudrone/camera_up/*` (deck tag 10) |
 | `xudrone_range_bridge.sh` | `/usr/local/bin/…` | EchoRanger + surface beam → `/xudrone/range/{bottom,surface}` |
 | `start_boat.sh` | `/root/start_boat.sh` | CoRAL pair (default `simctl start`) |
 | `start_udrone.sh` | `/root/start_udrone.sh` | `--secondary` (from boat) or solo |
@@ -142,7 +145,7 @@ and emits events.
 | topic | direction | payload |
 |---|---|---|
 | `/coral/command` | in | JSON `std_msgs/String` |
-| `/coral/event` | out | accepted / arrived / dock_done / helix_done / swim_done / hoop_done / coverage_done / approach_done / survey_done / failed / rejected / aborted |
+| `/coral/event` | out | accepted / arrived / dock_done / helix_done / swim_done / hoop_done / track_done / coverage_done / approach_done / survey_done / failed / rejected / aborted |
 | `/coral/status` | out | ~1 Hz: busy, phase, latch, boat/auv pose |
 | `/coral/detections` | out | settled AprilTag ENU records |
 | `/coral/tracks` | out | ~2 Hz live ENU while a tag is in view (coverage / logging) |
@@ -157,6 +160,7 @@ Commands:
 {"type":"helix","duration_s"?, "radius_m"?, "omega"?, "vx"?, "z0"?, "id"?}
 {"type":"swim","north_m"?, "east_m"?, "along_heading_m"?, "relative_to":"current"|"world"|"heading", "depth_m"?, "speed_mps"?, "arrive_m"?, "id"?}
 {"type":"hoop","id"?}
+{"type":"track","duration_s"?, "standoff_m"?, "id"?}
 {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "until"?: "tag_detected","id"?}
 {"type":"approach_tag","tag_id"?, "standoff_m"?, "tag_size_m"?, "settle_s"?, "timeout_s"?, "acquire_s"?, "search_budget_s"?, "search_r0_m"?, "search_r_max_m"?, "center_east_m"?, "center_north_m"?, "id"?}
 {"type":"hold"|"abort","id"?}
@@ -167,7 +171,8 @@ Commands:
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
 | `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
-| `hoop` | xudrone | front-camera search for the orange ring, then a forward sweep through the opening. The authored (6, 0) coordinate is not a steering target. Rejected while latched. Debug image: `/xudrone/hoop_debug/image` |
+| `hoop` | xudrone | front-camera search for the orange ring, then one smooth join onto the centerline through the opening. A pass needs the ring around the optical axis and the hull inside the opening at ENU (6, 0, −1). Rejected while latched. Debug image: `/xudrone/hoop_debug/image` |
+| `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
 | `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected` |
 | `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
 | `dock` | latch | boat-nest ATTACH/DETACH (gates 0.6 m / 30°) — not bed-tag geometry |
@@ -176,7 +181,12 @@ Default `tag_size_m` is **0.4** (matches the cube faces / `apriltag.yaml`).
 
 Perception: otter_k nadir → `/otter_k/detections`; xudrone **front** →
 `/xudrone/detections` (primary until-stop while pitched); xudrone nadir →
-`/xudrone/detections_down` + `tag_detector` ENU / tracks.
+`/xudrone/detections_down` + `tag_detector` ENU / tracks; xudrone **upward** →
+`/xudrone/detections_up` (tag 10 under the deck).
+
+`track` is the Kiwanis form of Harish Anand's thesis,
+[Coordinated Navigation and Localization of an Autonomous Underwater Vehicle Using an Autonomous Surface Vehicle in the OpenUAV Simulation Framework](https://keep.lib.asu.edu/_flysystem/fedora/c7/233928/Anand_asu_0010N_20290.pdf)
+(MS, Arizona State University, August 2020, PDF). The thesis holds the AUV 5 m under a marker on the ASV. Kiwanis Lake is about 2.4 m deep, so the station is 1 m under tag 10.
 
 **Range / depth (state estimation + awareness):** downward EchoRanger
 (`lidar_sensor_link`) feeds PX4 `distance_sensor` via GZBridge with
@@ -193,6 +203,7 @@ docker exec digital-twin-aquatic coral_cmd.py goto --along 8
 docker exec digital-twin-aquatic coral_cmd.py helix --duration 20 --radius 0.4
 docker exec digital-twin-aquatic coral_cmd.py swim --north 10
 docker exec digital-twin-aquatic coral_cmd.py hoop
+docker exec digital-twin-aquatic coral_cmd.py track --duration 90 --standoff 1
 docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --layers 3
 docker exec digital-twin-aquatic coral_cmd.py approach_tag --standoff 1.5 --east 5 --north 4 --world
 docker exec digital-twin-aquatic coral_cmd.py dock attach
@@ -294,7 +305,7 @@ for airframe 60003 — the adapter must not subscribe there.
   PWM-ish 1100–1900 (and ±1) to ±36 N.
 - Mass **13.5 kg**; displacement ~13.70 kg → awash at z≈−0.11 without thrust.
 - Boat: Heron graded buoyancy + jets (same as production otter); DDS NS `otter_k`.
-- Front camera → `/xudrone/camera/*` (one bridge; flock-guarded).
+- Front camera → `/xudrone/camera_front/*`, nadir → `/xudrone/camera_down/*`, upward → `/xudrone/camera_up/*` (one bridge each; flock-guarded). The upward link is pitched −90° on the hull crown so it looks at deck tag 10.
 - `SDLOG_MODE` default 0 on airframe 60003 (no .ulg from boot). Set the same on
   otter_k once if its rootfs still has 1: `px4-param --instance 0 set SDLOG_MODE 0`.
 - DeepGIS: callsigns **otter_k** and **xudrone** (host watchdogs + pose tokens

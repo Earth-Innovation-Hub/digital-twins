@@ -290,6 +290,49 @@
       <child>down_camera_link</child>
     </joint>
 
+    <!-- Upward camera on the hull crown. Pitched -90 deg so optical +X is
+         body +Z. Used to see AprilTag 36h11 id 10 under the Heron deck. -->
+    <link name="up_camera_link">
+      <pose>0 0 0.13 0 -1.57079632679 0</pose>
+      <inertial>
+        <mass>0.01</mass>
+        <inertia>
+          <ixx>1e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-05</iyy><iyz>0</iyz>
+          <izz>1e-05</izz>
+        </inertia>
+      </inertial>
+      <visual name="up_camera_housing">
+        <geometry><box><size>0.03 0.03 0.025</size></box></geometry>
+        <material>
+          <ambient>0.75 0.75 0.8 1</ambient>
+          <diffuse>0.8 0.8 0.85 1</diffuse>
+        </material>
+      </visual>
+      <sensor name="up_camera" type="camera">
+        <pose>0 0 0 0 0 0</pose>
+        <camera>
+          <horizontal_fov>1.2</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>20</far>
+          </clip>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+      </sensor>
+    </link>
+    <joint name="up_camera_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>up_camera_link</child>
+    </joint>
+
     <!-- ============================================================ -->
     <!--  EchoRanger (down): single-beam gpu_lidar → PX4 distance_sensor -->
     <!--  GZBridge hard-codes: .../link/lidar_sensor_link/sensor/lidar/scan -->

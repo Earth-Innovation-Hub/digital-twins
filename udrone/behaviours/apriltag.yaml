@@ -1,5 +1,6 @@
 # apriltag_ros on otter_k / xudrone cameras (Locutus twin.launch pattern).
-# Tag: 36h11 id 0, 0.40 m edge on each face of a 0.50 m cube at ENU (5, 4).
+# Tags: 36h11, 0.40 m. Id 0 is the cube at ENU (5, 4). Id 10 is the tag
+# centered on the underside of the Heron deck. One size fits both.
 /**:
   ros__parameters:
     image_transport: raw

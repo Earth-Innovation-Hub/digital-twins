@@ -1,5 +1,6 @@
 #!/bin/bash
 # xudrone fixed nadir camera -> /xudrone/camera_down/{image,camera_info}
+# Pair with the front bridge's /xudrone/camera_front.
 # Flock-guarded: start_boat and start_udrone --secondary may both try to start it.
 set -e
 exec 9> /tmp/xudrone_down_camera_bridge.lock

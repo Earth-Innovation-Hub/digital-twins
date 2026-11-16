@@ -1,5 +1,6 @@
 #!/bin/bash
-# xudrone front camera (Gazebo) -> ROS 2 /xudrone/camera/{image,camera_info}
+# xudrone front camera (Gazebo) -> ROS 2 /xudrone/camera_front/{image,camera_info}
+# The nadir bridge uses /xudrone/camera_down. Both names carry the view.
 # Started by start_udrone.sh; the host watchdog restarts it if it dies. Only
 # one copy runs: the lock is inherited by the bridge and freed when it exits.
 set -e
@@ -48,5 +49,5 @@ exec ros2 run ros_gz_bridge parameter_bridge \
   "$CAM/image@sensor_msgs/msg/Image[gz.msgs.Image" \
   "$CAM/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo" \
   --ros-args -r __node:=xudrone_camera_bridge -r __ns:=/xudrone \
-  -r "$CAM/image:=/xudrone/camera/image" \
-  -r "$CAM/camera_info:=/xudrone/camera/camera_info"
+  -r "$CAM/image:=/xudrone/camera_front/image" \
+  -r "$CAM/camera_info:=/xudrone/camera_front/camera_info"

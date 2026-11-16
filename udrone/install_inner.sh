@@ -57,6 +57,9 @@ install)
   cp -a $N/xudrone_model.config $Mdir/model.config
   cp -a $N/heron_model.sdf $Hdir/model.sdf
   cp -a $N/heron_model.config $Hdir/model.config
+  mkdir -p $Hdir/meshes $Hdir/materials/textures
+  cp -a $N/tag_plane.obj $Hdir/meshes/tag_plane.obj
+  cp -a $N/apriltag36h11_10.png $Hdir/materials/textures/apriltag36h11_10.png
   cp -a $N/kiwanis_lake.sdf $W
   rm -rf $Kdir
   cp -a $N/kiwanis_lake $Kdir
@@ -82,6 +85,7 @@ install)
   install -m 755 $N/stop_sim.sh /root/stop_sim.sh
   install -m 755 $N/xudrone_camera_bridge.sh /usr/local/bin/xudrone_camera_bridge.sh
   install -m 755 $N/xudrone_down_camera_bridge.sh /usr/local/bin/xudrone_down_camera_bridge.sh
+  install -m 755 $N/xudrone_up_camera_bridge.sh /usr/local/bin/xudrone_up_camera_bridge.sh
   install -m 755 $N/xudrone_range_bridge.sh /usr/local/bin/xudrone_range_bridge.sh
   install -m 755 $N/otter_k_down_camera_bridge.sh /usr/local/bin/otter_k_down_camera_bridge.sh
   install -m 755 $N/dock_command.py /usr/local/bin/dock_command.py

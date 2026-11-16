@@ -20,6 +20,7 @@ mkdir -p /root/log
 pkill -f '^/usr/local/bin/udrone_thrust_adapter' 2>/dev/null || true
 pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/null || true
 pkill -f 'xudrone_down_camera_bridge|xudrone.*/down_camera' 2>/dev/null || true
+pkill -f 'xudrone_up_camera_bridge|xudrone.*/up_camera' 2>/dev/null || true
 pkill -f 'xudrone_range_bridge|lidar_sensor_link|surface_range_link' 2>/dev/null || true
 pkill -f 'otter_k_down_camera_bridge|heron_0.*/down_camera' 2>/dev/null || true
 pkill -f 'apriltag_node|tag_detector|run_tags' 2>/dev/null || true
@@ -67,6 +68,10 @@ setsid nohup env GZ_PARTITION=aquatic UDRONE_GZ_MODEL=xudrone_1 \
   # Secondary AUV model is xudrone_1 when launched from the boat twin.
   GZ_MODEL_NAME=xudrone_1 exec /usr/local/bin/xudrone_down_camera_bridge.sh
 ) >> /root/log/xudrone_down_camera.log 2>&1 &
+(
+  sleep 30
+  GZ_MODEL_NAME=xudrone_1 exec /usr/local/bin/xudrone_up_camera_bridge.sh
+) >> /root/log/xudrone_up_camera.log 2>&1 &
 (
   sleep 35
   exec /usr/local/bin/coral_tags.sh otter_k

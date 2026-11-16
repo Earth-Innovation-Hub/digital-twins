@@ -39,6 +39,8 @@ def kind(cmd):
         return "adapter"
     if ("xudrone_camera_bridge" in cmd or "front_camera_link/sensor/front_camera" in cmd
             or "xudrone_down_camera_bridge" in cmd
+            or "xudrone_up_camera_bridge" in cmd
+            or "up_camera_link/sensor/up_camera" in cmd
             or "otter_k_down_camera_bridge" in cmd or "down_camera_link/sensor/down_camera" in cmd
             or "apriltag_node" in cmd or "tag_detector" in cmd or "run_tags" in cmd
             or "coral_tags" in cmd):
