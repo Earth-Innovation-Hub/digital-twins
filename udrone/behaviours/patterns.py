@@ -115,6 +115,171 @@ def swim_path_end(
     return world_offset_to_path(de, dn, yaw)
 
 
+def curve_speed_cap(radius_m: float, mass_kg: float = 13.666, force_n: float = 144.0) -> float:
+    """Pace at which a circular turn's m v²/r equals full forward thrust."""
+    return math.sqrt(force_n * max(float(radius_m), 0.05) / mass_kg)
+
+
+def _eased_pieces(waypoints: list, speed_mps: float, fillet_m: float):
+    """Straight runs joined by circular fillets. Constant pace, slow enough for the tightest fillet."""
+    pts = [tuple(float(c) for c in p) for p in waypoints]
+    clean = []
+    for p in pts:
+        if not clean or math.dist(p, clean[-1]) > 1e-4:
+            clean.append(p)
+    if len(clean) < 2:
+        return []
+    n = len(clean)
+    arcs = [None] * n
+    for i in range(1, n - 1):
+        a, b, c = clean[i - 1], clean[i], clean[i + 1]
+        v1 = tuple(b[k] - a[k] for k in range(3))
+        v2 = tuple(c[k] - b[k] for k in range(3))
+        l1 = math.sqrt(sum(x * x for x in v1))
+        l2 = math.sqrt(sum(x * x for x in v2))
+        if l1 < 1e-4 or l2 < 1e-4:
+            continue
+        d1 = tuple(x / l1 for x in v1)
+        d2 = tuple(x / l2 for x in v2)
+        if abs(d1[2]) > 0.5 or abs(d2[2]) > 0.5:
+            continue
+        dot = max(-1.0, min(1.0, sum(d1[k] * d2[k] for k in range(3))))
+        alpha = math.acos(dot)
+        if alpha < 0.08 or alpha > 2.8:
+            continue
+        half = math.tan(alpha / 2.0)
+        r = float(fillet_m)
+        trim_len = r * half
+        limit = 0.45 * min(l1, l2)
+        if trim_len > limit:
+            trim_len = limit
+            r = trim_len / half
+        cross = d1[0] * d2[1] - d1[1] * d2[0]
+        sign = 1.0 if cross >= 0.0 else -1.0
+        p_in = tuple(b[k] - d1[k] * trim_len for k in range(3))
+        p_out = tuple(b[k] + d2[k] * trim_len for k in range(3))
+        nx, ny = -d1[1] * sign, d1[0] * sign
+        center = (p_in[0] + nx * r, p_in[1] + ny * r, p_in[2])
+        a0 = math.atan2(p_in[1] - center[1], p_in[0] - center[0])
+        a1 = math.atan2(p_out[1] - center[1], p_out[0] - center[0])
+        sweep = math.atan2(math.sin(a1 - a0), math.cos(a1 - a0))
+        arcs[i] = {
+            "center": center, "r": r, "a0": a0, "sweep": sweep,
+            "p_in": p_in, "p_out": p_out, "z0": p_in[2], "z1": p_out[2],
+        }
+    speed = max(float(speed_mps), 0.05)
+    pieces = []
+    for i in range(n - 1):
+        a, b = clean[i], clean[i + 1]
+        p0 = arcs[i]["p_out"] if arcs[i] else a
+        p1 = arcs[i + 1]["p_in"] if arcs[i + 1] else b
+        length = math.dist(p0, p1)
+        if length > 1e-4:
+            direction = tuple((p1[k] - p0[k]) / length for k in range(3))
+            pieces.append({
+                "kind": "line", "p0": p0, "d": direction, "length": length,
+                "speed": speed, "dt": length / speed,
+            })
+        arc = arcs[i + 1]
+        if arc:
+            alen = abs(arc["sweep"]) * arc["r"]
+            pieces.append({
+                "kind": "arc", **arc, "length": alen, "speed": speed,
+                "dt": alen / max(speed, 1e-6),
+            })
+    return pieces
+
+
+def _sample_piece(piece: dict, tau: float, held: bool):
+    if piece["kind"] == "line":
+        s = piece["length"] if held else piece["speed"] * tau
+        pos = tuple(piece["p0"][k] + piece["d"][k] * s for k in range(3))
+        if held:
+            return pos, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+        vel = tuple(piece["d"][k] * piece["speed"] for k in range(3))
+        return pos, vel, (0.0, 0.0, 0.0)
+    if piece["dt"] <= 1e-9:
+        theta = piece["a0"] + piece["sweep"]
+        w = 0.0
+        u = 1.0
+    else:
+        u = 1.0 if held else min(1.0, max(0.0, tau / piece["dt"]))
+        theta = piece["a0"] + piece["sweep"] * u
+        w = 0.0 if held else piece["sweep"] / piece["dt"]
+    c, s = math.cos(theta), math.sin(theta)
+    r = piece["r"]
+    z = piece["z0"] + (piece["z1"] - piece["z0"]) * u
+    pos = (piece["center"][0] + r * c, piece["center"][1] + r * s, z)
+    if held:
+        return pos, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+    vz = (piece["z1"] - piece["z0"]) / piece["dt"] if piece["dt"] > 1e-9 else 0.0
+    vel = (-r * s * w, r * c * w, vz)
+    acc = (-r * c * w * w, -r * s * w * w, 0.0)
+    return pos, vel, acc
+
+
+def eased_duration(waypoints: list, speed_mps: float, fillet_m: float = 0.6) -> float:
+    """Seconds to swim a filleted polyline at the curvature-limited pace."""
+    return sum(p["dt"] for p in _eased_pieces(waypoints, speed_mps, fillet_m))
+
+
+def eased_polyline(waypoints: list, speed_mps: float, t: float, fillet_m: float = 0.6):
+    """Position, velocity, and acceleration along a filleted polyline.
+
+    Corners become circular arcs. The pace stays at the requested speed.
+    After the end, the last point is held with zero velocity.
+    """
+    pieces = _eased_pieces(waypoints, speed_mps, fillet_m)
+    if not pieces:
+        p = tuple(waypoints[-1]) if waypoints else (0.0, 0.0, 0.0)
+        return p, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+    remain = max(0.0, float(t))
+    for i, piece in enumerate(pieces):
+        last = i == len(pieces) - 1
+        if remain <= piece["dt"] or last:
+            held = last and remain >= piece["dt"]
+            tau = piece["dt"] if held else remain
+            return _sample_piece(piece, tau, held)
+        remain -= piece["dt"]
+    return _sample_piece(pieces[-1], pieces[-1]["dt"], True)
+
+
+def trapezoid(length_m: float, vmax: float, amax: float, t: float):
+    """(s, v, a) along a straight run that speeds up, cruises, and slows to a stop.
+
+    A run too short to reach vmax peaks lower (a triangle profile).
+    """
+    length = max(0.0, float(length_m))
+    amax = max(1e-3, float(amax))
+    vmax = max(1e-3, float(vmax))
+    t_acc = vmax / amax
+    if amax * t_acc * t_acc > length:
+        t_acc = math.sqrt(length / amax)
+        vmax = amax * t_acc
+    d_acc = 0.5 * amax * t_acc * t_acc
+    t_cruise = (length - 2.0 * d_acc) / vmax
+    total = 2.0 * t_acc + t_cruise
+    t = max(0.0, float(t))
+    if t >= total:
+        return length, 0.0, 0.0
+    if t < t_acc:
+        return 0.5 * amax * t * t, amax * t, amax
+    if t < t_acc + t_cruise:
+        return d_acc + vmax * (t - t_acc), vmax, 0.0
+    r = total - t
+    return length - 0.5 * amax * r * r, amax * r, -amax
+
+
+def trapezoid_time(length_m: float, vmax: float, amax: float) -> float:
+    length = max(0.0, float(length_m))
+    amax = max(1e-3, float(amax))
+    vmax = max(1e-3, float(vmax))
+    t_acc = vmax / amax
+    if amax * t_acc * t_acc > length:
+        return 2.0 * math.sqrt(length / amax)
+    return 2.0 * t_acc + (length - amax * t_acc * t_acc) / vmax
+
+
 def polyline_pos_vel(waypoints: list, speed_mps: float, t: float):
     """Constant-speed interpolation along a 3D polyline.
 

@@ -2,6 +2,7 @@
 
 POST /jobs  — start bake+spawn+enroll (Bearer token)
 GET  /jobs/<id> — status
+POST /sessions/<callsign>/stop|start|purge — session containers only
 
 Bind to localhost / overlay only. Do not expose without auth.
 """
@@ -25,6 +26,17 @@ TOKEN = os.environ.get("DEEPGIS_TWIN_BUILDER_TOKEN", "")
 JOB_ROOT = Path(os.environ.get("DEEPGIS_TWIN_JOBS_DIR", "/var/twin-jobs"))
 HOST = os.environ.get("DEEPGIS_TWIN_BUILDER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("DEEPGIS_TWIN_BUILDER_PORT", "8769"))
+
+
+def session_route(path):
+    """(callsign, action) for /sessions/<callsign>/<stop|start|purge>, else None."""
+    parts = [part for part in (path or "").split("/") if part]
+    if len(parts) != 3 or parts[0] != "sessions":
+        return None
+    callsign, action = parts[1], parts[2]
+    if action not in ("stop", "start", "purge"):
+        return None
+    return callsign, action
 
 
 def _auth(handler):
@@ -103,6 +115,10 @@ def _run_job(job_id):
             return
         set_status("enrolling", "Enrolling pose agent")
         enroll = spawn.enroll_pose(job["callsign"], job["look_at"])
+        try:
+            enroll["frames"] = spawn.start_frames(job["callsign"])
+        except Exception as frame_error:
+            enroll["frames"] = {"status": "failed", "error": type(frame_error).__name__}
         set_status(
             "ready",
             "Twin ready",
@@ -149,6 +165,9 @@ class Handler(BaseHTTPRequestHandler):
         if not _auth(self):
             return self._json(401, {"error": "unauthorized"})
         path = urlparse(self.path).path
+        route = session_route(path)
+        if route is not None:
+            return self._session(route)
         if path.rstrip("/") != "/jobs":
             return self._json(404, {"error": "not found"})
         length = int(self.headers.get("Content-Length") or 0)
@@ -200,9 +219,38 @@ class Handler(BaseHTTPRequestHandler):
         threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
         return self._json(200, {"id": job_id, "status": "queued", "callsign": callsign})
 
+    def _session(self, route):
+        callsign, action = route
+        try:
+            spawn._assert_safe_name(callsign)
+            if not callsign.startswith("ktwin-"):
+                raise ValueError("not a session twin")
+        except ValueError as exc:
+            return self._json(400, {"error": str(exc)[:200]})
+        try:
+            if action == "stop":
+                result = spawn.stop_session(callsign)
+            elif action == "start":
+                result = spawn.start_session(callsign)
+            else:
+                result = spawn.purge_session(callsign)
+        except RuntimeError as exc:
+            return self._json(400, {"error": str(exc)[:200]})
+        return self._json(200, result)
+
     def log_message(self, fmt, *args):
         # Keep stdout quiet; ops can wrap with a logger
         pass
+
+
+def _frames_loop():
+    """Heal camera sidecars after a session container restart."""
+    while True:
+        try:
+            spawn.reconcile_session_frames()
+        except Exception:
+            pass
+        time.sleep(20)
 
 
 def main():
@@ -210,6 +258,7 @@ def main():
         raise SystemExit("DEEPGIS_TWIN_BUILDER_TOKEN is required")
     JOB_ROOT.mkdir(parents=True, exist_ok=True)
     spawn.SESSIONS_ROOT.mkdir(parents=True, exist_ok=True)
+    threading.Thread(target=_frames_loop, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"twin-builder listening on {HOST}:{PORT}", flush=True)
     server.serve_forever()

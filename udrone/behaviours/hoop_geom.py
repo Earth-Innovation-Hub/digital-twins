@@ -1,16 +1,16 @@
 """Kiwanis hula hoop geometry. ROS-free.
 
 The ring is vertical: a 1 m opening in the north-up plane, centred at ENU
-(6, 0, -1), so the axis runs east-west. The flight does not use that
-coordinate. It fits an ellipse to the orange tube in the front camera and
-back-projects the centre with the pinhole. The major axis is the 1.09 m
-outer diameter at any viewing angle.
+(6, 0, -4.626), the midpoint of the 9.25 m water column there. The axis
+runs east-west. The flight does not use that coordinate. It fits an ellipse
+to the orange tube in the front camera and back-projects the centre with
+the pinhole. The major axis is the 1.09 m outer diameter at any viewing angle.
 """
 from __future__ import annotations
 
 import math
 
-HOOP_CENTER = (6.0, 0.0, -1.0)  # authored ring, east, north, up
+HOOP_CENTER = (6.0, 0.0, -4.626)  # authored ring, east, north, up
 HOOP_AXIS = (1.0, 0.0, 0.0)     # +east through the opening
 HOOP_RADIUS = 0.50              # 1 m diameter, tube centreline
 RING_OUTER_M = 1.09             # outer diameter: 1.0 m plus the 0.045 m tube
@@ -85,7 +85,7 @@ def sweep_points(vehicle, center, lead_m: float = 2.4, exit_m: float = 2.0):
     else:
         ux, uy = de / dist, dn / dist
     lead = min(float(lead_m), max(0.6, dist * 0.55))
-    z = min(-0.65, max(-1.35, float(center[2])))
+    z = pass_depth(center[2])
     stand = (float(center[0]) - ux * lead, float(center[1]) - uy * lead, z)
     ease = (
         float(vehicle[0]) + 0.45 * (stand[0] - float(vehicle[0])),
@@ -136,7 +136,7 @@ def _peak_turn(points):
     return worst
 
 
-def fly_trajectory(pos, heading, center, lead_m: float = 2.4, exit_m: float = 2.0,
+def fly_trajectory(pos, heading, center, lead_m: float = 1.62, exit_m: float = 2.0,
                    through: bool = True):
     """One smooth path onto the ring, then — when ``through`` — straight out the far side.
 
@@ -160,7 +160,7 @@ def fly_trajectory(pos, heading, center, lead_m: float = 2.4, exit_m: float = 2.
         ax, ay = hx, hy
     else:
         ax, ay = de / dist, dn / dist
-    z = min(-0.65, max(-1.35, float(center[2])))
+    z = pass_depth(center[2])
     if dist < 0.9:
         lead = max(0.35, dist * 0.40)
     else:
@@ -417,23 +417,31 @@ def _fit_outer_ellipse(label, labels):
     return float(cu), float(cv), major, minor
 
 
-# Coverage grid for the hoop search. World-aligned 2 m cells. A cell is a
+# Coverage grid for the hoop search. World-aligned 2.07 m cells. A cell is a
 # glance at 1 and searched at 2, and only the front-camera wedge at hoop
 # depth can raise the count. The wedge is half of a 640-wide frame at
 # fx 381 (about ±40°), not a narrower glance. The box is 20 m on a side around the dock at
 # the origin. A vehicle that arms outside it is sent to the nearest open cell.
-CELL_M = 2.0
+CELL_M = 2.07
 MAP_HALF_M = 10.0
 WEDGE_NEAR_M = 1.5
 WEDGE_FAR_M = 6.0
 WEDGE_HALF_RAD = math.atan(320.0 / 381.46)
-DEPTH_LO = -1.40
-DEPTH_HI = -0.70
+DEPTH_LO = -5.15
+DEPTH_HI = -4.10
 SEARCH_HITS = 2
 LOOK_S = 1.5
-SEARCH_Z = -1.0
-VIEW_STAND_M = 3.5
+SEARCH_Z = -4.626
+# Below this the hull has left the ring and is heading for the bed.
+HOOP_FLOOR = -6.2
+VIEW_STAND_M = 3.31
 VIEW_NEAR_M = 2.0
+PASS_TOP = -0.5
+
+
+def pass_depth(z: float) -> float:
+    """Depth to fly through a ring seen at z, kept off the surface and the floor."""
+    return min(PASS_TOP, max(HOOP_FLOOR + 0.5, float(z)))
 
 
 def _wrap_pi(angle: float) -> float:
@@ -447,7 +455,7 @@ def _columns(lo: float, hi: float, res: float):
 
 
 class CoverageMap:
-    """Hit count per 2 m ENU cell. 0 unseen, 1 glanced, 2 searched."""
+    """Hit count per cell. 0 unseen, 1 glanced, 2 searched."""
 
     def __init__(self, east0: float, north0: float, half_m: float = MAP_HALF_M, res: float = CELL_M):
         self.res = float(res)

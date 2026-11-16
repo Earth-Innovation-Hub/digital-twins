@@ -2,22 +2,10 @@
 <sdf version="1.9">
   <model name="kiwanis_lake">
     <static>true</static>
-    <!-- Kiwanis Lake Tempe. Polygon water/bed visuals; tiled-box bed collision
-         (ODE mesh collision segfaults); park hole visual + AABB land slabs.
-         Depth dish shore 1.0 m → center 2.44 m. ~12.67 acres. -->
+    <!-- Kiwanis Lake Tempe. Bed and park are pictures only. No water mesh,
+         no props, and no collision: the hoop, the tag cube, the bed tiles
+         and the bank walls are not solid. ~12.67 acres. -->
     <link name="link">
-      <visual name="water">
-        <!-- Classic material (no PBR): ogre2 PBR often ignores transparency and
-             hides the bed / tag from the down-camera. -->
-        <transparency>0.72</transparency>
-        <cast_shadows>false</cast_shadows>
-        <geometry><mesh><uri>model://kiwanis_lake/meshes/water.obj</uri></mesh></geometry>
-        <material>
-          <ambient>0.02 0.12 0.18 0.35</ambient>
-          <diffuse>0.03 0.18 0.26 0.35</diffuse>
-          <specular>0.25 0.35 0.40 1</specular>
-        </material>
-      </visual>
       <visual name="bed">
         <geometry><mesh><uri>model://kiwanis_lake/meshes/bed.obj</uri></mesh></geometry>
         <!-- Planar ENU UVs, 8 m/tile; procedural silt/sand albedo. -->
@@ -66,21 +54,11 @@
         </material>
       </visual>
 
-      <!-- West pier (satellite: dock from W bank into lake) -->
-      <visual name="west_pier">
-        <pose>-95.0 28.0 0.15 0 0 0.35</pose>
-        <geometry><box><size>18.0 2.4 0.30</size></box></geometry>
-        <material>
-          <ambient>0.55 0.50 0.42 1</ambient>
-          <diffuse>0.55 0.50 0.42 1</diffuse>
-        </material>
-      </visual>
-
       <!-- AprilTag cube 0.50 m at ENU (5, 4): 36h11 id 0 on all six faces
            (0.40 m UV planes) so front / nadir / any yaw can see a tag.
-           Centre sits 0.25 m above the bed dish (~z=-2.08). -->
+           Sits on the bed. The water here is 9.49 m deep. -->
       <visual name="tag_cube">
-        <pose>5.0 4.0 -1.83 0 0 0</pose>
+        <pose>5.0 4.0 -9.223 0 0 0</pose>
         <geometry><box><size>0.50 0.50 0.50</size></box></geometry>
         <material>
           <ambient>0.95 0.95 0.95 1</ambient>
@@ -90,7 +68,7 @@
       </visual>
       <!-- Face normals = local +Z of tag_plane.obj; offset 1 mm proud of cube. -->
       <visual name="apriltag_0_pz">
-        <pose>5.0 4.0 -1.579 0 0 0</pose>
+        <pose>5.0 4.0 -8.972 0 0 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
@@ -107,7 +85,7 @@
         </material>
       </visual>
       <visual name="apriltag_0_nz">
-        <pose>5.0 4.0 -2.081 0 3.14159265359 0</pose>
+        <pose>5.0 4.0 -9.474 0 3.14159265359 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
@@ -124,7 +102,7 @@
         </material>
       </visual>
       <visual name="apriltag_0_px">
-        <pose>5.251 4.0 -1.83 0 -1.57079632679 0</pose>
+        <pose>5.251 4.0 -9.223 0 -1.57079632679 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
@@ -141,7 +119,7 @@
         </material>
       </visual>
       <visual name="apriltag_0_nx">
-        <pose>4.749 4.0 -1.83 0 1.57079632679 0</pose>
+        <pose>4.749 4.0 -9.223 0 1.57079632679 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
@@ -158,7 +136,7 @@
         </material>
       </visual>
       <visual name="apriltag_0_py">
-        <pose>5.0 4.251 -1.83 -1.57079632679 0 0</pose>
+        <pose>5.0 4.251 -9.223 -1.57079632679 0 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
@@ -175,7 +153,7 @@
         </material>
       </visual>
       <visual name="apriltag_0_ny">
-        <pose>5.0 3.749 -1.83 1.57079632679 0 0</pose>
+        <pose>5.0 3.749 -9.223 1.57079632679 0 0</pose>
         <cast_shadows>false</cast_shadows>
         <geometry><mesh><uri>model://kiwanis_lake/meshes/tag_plane.obj</uri></mesh></geometry>
         <material>
@@ -192,572 +170,20 @@
         </material>
       </visual>
 
-      <!-- Vertical hula hoop, 1 m opening, centre ENU (6, 0, -1).
-           Axis is east-west. Tube radius 0.045 m. Orange ring only;
-           the search reads it with the front camera. -->
-      <visual name="hoop_seg_0"><pose>6 0.000 -0.500 -1.5708 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_0"><pose>6 0.000 -0.500 -1.5708 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_1"><pose>6 0.250 -0.567 -2.0944 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_1"><pose>6 0.250 -0.567 -2.0944 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_2"><pose>6 0.433 -0.750 -2.6180 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_2"><pose>6 0.433 -0.750 -2.6180 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_3"><pose>6 0.500 -1.000 -3.1416 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_3"><pose>6 0.500 -1.000 -3.1416 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_4"><pose>6 0.433 -1.250 -3.6652 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_4"><pose>6 0.433 -1.250 -3.6652 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_5"><pose>6 0.250 -1.433 -4.1888 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_5"><pose>6 0.250 -1.433 -4.1888 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_6"><pose>6 0.000 -1.500 -4.7124 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_6"><pose>6 0.000 -1.500 -4.7124 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_7"><pose>6 -0.250 -1.433 -5.2360 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_7"><pose>6 -0.250 -1.433 -5.2360 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_8"><pose>6 -0.433 -1.250 -5.7596 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_8"><pose>6 -0.433 -1.250 -5.7596 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_9"><pose>6 -0.500 -1.000 -6.2832 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_9"><pose>6 -0.500 -1.000 -6.2832 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_10"><pose>6 -0.433 -0.750 -6.8068 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_10"><pose>6 -0.433 -0.750 -6.8068 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-      <visual name="hoop_seg_11"><pose>6 -0.250 -0.567 -7.3304 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
-      <collision name="hoop_seg_11"><pose>6 -0.250 -0.567 -7.3304 0 0</pose><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry></collision>
-
-      <!-- ---- Lake props (visual; keep clear of spawn 0,0) ---- -->
-      <!-- Bottom: rocks / debris on the depth dish -->
-      <visual name="rock_a">
-        <pose>-42.0 38.0 -2.05 0.2 0.1 0.4</pose>
-        <geometry><sphere><radius>0.55</radius></sphere></geometry>
-        <material>
-          <ambient>0.32 0.30 0.28 1</ambient>
-          <diffuse>0.42 0.40 0.36 1</diffuse>
-        </material>
-      </visual>
-      <visual name="rock_b">
-        <pose>-40.5 36.5 -2.10 0.1 -0.2 1.1</pose>
-        <geometry><sphere><radius>0.35</radius></sphere></geometry>
-        <material>
-          <ambient>0.28 0.27 0.25 1</ambient>
-          <diffuse>0.38 0.36 0.32 1</diffuse>
-        </material>
-      </visual>
-      <visual name="rock_c">
-        <pose>32.0 52.0 -2.15 0.3 0.15 -0.5</pose>
-        <geometry><box><size>1.40 0.95 0.70</size></box></geometry>
-        <material>
-          <ambient>0.30 0.28 0.26 1</ambient>
-          <diffuse>0.40 0.37 0.33 1</diffuse>
-        </material>
-      </visual>
-      <visual name="sunken_crate">
-        <pose>-28.0 -42.0 -2.20 0.05 0.08 0.6</pose>
-        <geometry><box><size>1.20 0.80 0.70</size></box></geometry>
-        <material>
-          <ambient>0.35 0.22 0.12 1</ambient>
-          <diffuse>0.48 0.30 0.16 1</diffuse>
-        </material>
-      </visual>
-      <visual name="sunken_tire">
-        <pose>-58.0 12.0 -2.00 1.5708 0 0.3</pose>
-        <geometry><cylinder><radius>0.40</radius><length>0.22</length></cylinder></geometry>
-        <material>
-          <ambient>0.08 0.08 0.08 1</ambient>
-          <diffuse>0.12 0.12 0.12 1</diffuse>
-        </material>
-      </visual>
-      <visual name="sunken_pipe">
-        <pose>48.0 -28.0 -2.05 0 1.2 0.4</pose>
-        <geometry><cylinder><radius>0.18</radius><length>3.2</length></cylinder></geometry>
-        <material>
-          <ambient>0.25 0.32 0.28 1</ambient>
-          <diffuse>0.35 0.45 0.38 1</diffuse>
-        </material>
-      </visual>
-      <visual name="bed_boulder">
-        <pose>18.0 -48.0 -2.18 -0.15 0.2 0.9</pose>
-        <geometry><sphere><radius>0.85</radius></sphere></geometry>
-        <material>
-          <ambient>0.34 0.32 0.29 1</ambient>
-          <diffuse>0.45 0.42 0.38 1</diffuse>
-        </material>
-      </visual>
-
-      <!-- Surface: buoys / floats / pads (visual only; no physics bob) -->
-      <visual name="buoy_orange_a">
-        <pose>22.0 16.0 0.18 0 0 0</pose>
-        <geometry><sphere><radius>0.28</radius></sphere></geometry>
-        <material>
-          <ambient>0.85 0.35 0.05 1</ambient>
-          <diffuse>1.0 0.45 0.08 1</diffuse>
-          <specular>0.4 0.3 0.2 1</specular>
-        </material>
-      </visual>
-      <visual name="buoy_stem_a">
-        <pose>22.0 16.0 0.48 0 0 0</pose>
-        <geometry><cylinder><radius>0.04</radius><length>0.35</length></cylinder></geometry>
-        <material>
-          <ambient>0.7 0.7 0.7 1</ambient>
-          <diffuse>0.85 0.85 0.85 1</diffuse>
-        </material>
-      </visual>
-      <visual name="buoy_orange_b">
-        <pose>-32.0 44.0 0.18 0 0 0.5</pose>
-        <geometry><sphere><radius>0.26</radius></sphere></geometry>
-        <material>
-          <ambient>0.85 0.35 0.05 1</ambient>
-          <diffuse>1.0 0.45 0.08 1</diffuse>
-        </material>
-      </visual>
-      <visual name="buoy_yellow">
-        <pose>-12.0 -58.0 0.16 0 0 -0.3</pose>
-        <geometry><sphere><radius>0.24</radius></sphere></geometry>
-        <material>
-          <ambient>0.75 0.65 0.10 1</ambient>
-          <diffuse>0.95 0.85 0.15 1</diffuse>
-        </material>
-      </visual>
-      <visual name="float_plank">
-        <pose>52.0 22.0 0.06 0 0 0.7</pose>
-        <geometry><box><size>2.40 0.35 0.08</size></box></geometry>
-        <material>
-          <ambient>0.45 0.32 0.18 1</ambient>
-          <diffuse>0.62 0.45 0.25 1</diffuse>
-        </material>
-      </visual>
-      <visual name="float_cooler">
-        <pose>-62.0 55.0 0.12 0 0 -0.4</pose>
-        <geometry><box><size>0.70 0.45 0.35</size></box></geometry>
-        <material>
-          <ambient>0.10 0.25 0.55 1</ambient>
-          <diffuse>0.15 0.40 0.80 1</diffuse>
-        </material>
-      </visual>
-      <visual name="lily_a">
-        <pose>8.0 -22.0 0.03 0 0 0.2</pose>
-        <geometry><cylinder><radius>0.55</radius><length>0.02</length></cylinder></geometry>
-        <material>
-          <ambient>0.12 0.38 0.14 1</ambient>
-          <diffuse>0.18 0.52 0.20 1</diffuse>
-        </material>
-      </visual>
-      <visual name="lily_b">
-        <pose>10.5 -20.0 0.03 0 0 1.1</pose>
-        <geometry><cylinder><radius>0.40</radius><length>0.02</length></cylinder></geometry>
-        <material>
-          <ambient>0.10 0.35 0.12 1</ambient>
-          <diffuse>0.16 0.48 0.18 1</diffuse>
-        </material>
-      </visual>
-      <visual name="lily_c">
-        <pose>6.5 -19.5 0.03 0 0 -0.8</pose>
-        <geometry><cylinder><radius>0.32</radius><length>0.02</length></cylinder></geometry>
-        <material>
-          <ambient>0.14 0.40 0.15 1</ambient>
-          <diffuse>0.20 0.55 0.22 1</diffuse>
-        </material>
-      </visual>
-
-      <collision name="bed_tile_0">
-        <pose>-175.577 81.248 -1.2524 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_1">
-        <pose>-175.577 117.248 -1.3013 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_2">
-        <pose>-139.577 45.248 -1.8764 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_3">
-        <pose>-139.577 81.248 -2.3802 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_4">
-        <pose>-139.577 117.248 -2.1236 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_5">
-        <pose>-103.577 45.248 -1.6974 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_6">
-        <pose>-103.577 81.248 -2.4839 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_7">
-        <pose>-103.577 117.248 -1.7009 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_8">
-        <pose>-67.577 9.248 -1.8243 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_9">
-        <pose>-67.577 45.248 -1.9189 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_10">
-        <pose>-67.577 81.248 -1.1972 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_11">
-        <pose>-31.577 -26.752 -1.4922 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_12">
-        <pose>-31.577 9.248 -2.5884 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_13">
-        <pose>-31.577 45.248 -1.8011 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_14">
-        <pose>4.423 -62.752 -1.1532 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_15">
-        <pose>4.423 -26.752 -1.9230 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_16">
-        <pose>4.423 9.248 -2.5884 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_17">
-        <pose>4.423 45.248 -2.5354 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_18">
-        <pose>4.423 81.248 -2.0438 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_19">
-        <pose>40.423 -98.752 -1.5163 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_20">
-        <pose>40.423 -62.752 -2.2463 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_21">
-        <pose>40.423 -26.752 -2.5884 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_22">
-        <pose>40.423 9.248 -2.5884 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_23">
-        <pose>40.423 45.248 -2.3530 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_24">
-        <pose>40.423 81.248 -1.4087 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_25">
-        <pose>76.423 -134.752 -1.2704 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_26">
-        <pose>76.423 -98.752 -2.5166 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_27">
-        <pose>76.423 -62.752 -2.4211 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_28">
-        <pose>76.423 -26.752 -2.1504 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_29">
-        <pose>76.423 9.248 -1.8750 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_30">
-        <pose>76.423 45.248 -1.2092 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_31">
-        <pose>112.423 -170.752 -1.1625 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_32">
-        <pose>112.423 -134.752 -2.1751 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_33">
-        <pose>112.423 -98.752 -2.1090 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_34">
-        <pose>112.423 -62.752 -1.2041 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_35">
-        <pose>148.423 -170.752 -1.1961 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_36">
-        <pose>148.423 -134.752 -1.8531 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bed_tile_37">
-        <pose>148.423 -98.752 -1.2760 0 0 0</pose>
-        <geometry><box><size>35.28 35.28 0.30</size></box></geometry>
-        <surface><friction><ode><mu>0.8</mu><mu2>0.8</mu2></ode></friction>
-          <contact><ode><max_vel>0.5</max_vel><min_depth>0.001</min_depth></ode></contact></surface>
-      </collision>
-      <collision name="bank_0">
-        <pose>164.4666 -159.2111 -0.9692 0 0 1.058489</pose>
-        <geometry><box><size>54.5759 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_1">
-        <pose>177.1319 -122.7272 -0.9692 0 0 1.630798</pose>
-        <geometry><box><size>25.0862 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_2">
-        <pose>169.4750 -100.5675 -0.9692 0 0 2.196663</pose>
-        <geometry><box><size>23.3652 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_3">
-        <pose>156.3512 -90.9343 -0.9692 0 0 3.028651</pose>
-        <geometry><box><size>12.0369 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_4">
-        <pose>135.9395 -77.9096 -0.9692 0 0 2.465496</pose>
-        <geometry><box><size>37.6186 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_5">
-        <pose>116.3946 -56.6423 -0.9692 0 0 2.047506</pose>
-        <geometry><box><size>21.6130 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_6">
-        <pose>107.6621 -18.8917 -0.9692 0 0 1.704736</pose>
-        <geometry><box><size>57.0200 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_7">
-        <pose>78.3021 48.9479 -0.9692 0 0 2.144670</pose>
-        <geometry><box><size>93.9551 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_8">
-        <pose>44.9962 94.8020 -0.9692 0 0 2.455998</pose>
-        <geometry><box><size>19.9863 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_9">
-        <pose>34.9162 99.4612 -0.9692 0 0 -2.429742</pose>
-        <geometry><box><size>5.0896 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_10">
-        <pose>22.2800 105.7455 -0.9692 0 0 2.521814</pose>
-        <geometry><box><size>27.2984 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_11">
-        <pose>4.7335 114.3165 -0.9692 0 0 3.048861</pose>
-        <geometry><box><size>12.6087 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_12">
-        <pose>-7.6583 111.6318 -0.9692 0 0 -2.642740</pose>
-        <geometry><box><size>13.5037 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_13">
-        <pose>-21.3269 90.3520 -0.9692 0 0 -1.972290</pose>
-        <geometry><box><size>38.8738 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_14">
-        <pose>-35.9888 69.0105 -0.9692 0 0 -2.677507</pose>
-        <geometry><box><size>16.1474 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_15">
-        <pose>-49.1835 66.5709 -0.9692 0 0 2.958339</pose>
-        <geometry><box><size>12.5699 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_16">
-        <pose>-63.9491 92.1969 -0.9692 0 0 1.889554</pose>
-        <geometry><box><size>52.4462 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_17">
-        <pose>-74.5326 115.9786 -0.9692 0 0 -2.602105</pose>
-        <geometry><box><size>5.8444 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_18">
-        <pose>-79.9737 117.7103 -0.9692 0 0 2.363567</pose>
-        <geometry><box><size>9.3471 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_19">
-        <pose>-86.5201 131.1701 -0.9692 0 0 1.820391</pose>
-        <geometry><box><size>21.6535 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_20">
-        <pose>-104.4071 149.9708 -0.9692 0 0 2.672750</pose>
-        <geometry><box><size>35.1411 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_21">
-        <pose>-129.2750 155.9079 -0.9692 0 0 -2.919220</pose>
-        <geometry><box><size>18.4027 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_22">
-        <pose>-160.8629 138.7927 -0.9692 0 0 -2.552475</pose>
-        <geometry><box><size>54.1338 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_23">
-        <pose>-188.2498 115.9208 -0.9692 0 0 -2.125047</pose>
-        <geometry><box><size>18.1904 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_24">
-        <pose>-192.3922 100.2425 -0.9692 0 0 -1.481708</pose>
-        <geometry><box><size>15.5511 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_25">
-        <pose>-187.4998 82.9933 -0.9692 0 0 -1.152969</pose>
-        <geometry><box><size>20.5729 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_26">
-        <pose>-178.8247 72.6415 -0.9692 0 0 -0.326872</pose>
-        <geometry><box><size>8.6578 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_27">
-        <pose>-176.8790 68.0776 -0.9692 0 0 -2.099220</pose>
-        <geometry><box><size>7.0173 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_28">
-        <pose>-165.2180 42.5154 -0.9692 0 0 -1.026830</pose>
-        <geometry><box><size>51.8898 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_29">
-        <pose>-146.0412 18.1815 -0.9692 0 0 -0.343470</pose>
-        <geometry><box><size>11.8540 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_30">
-        <pose>-123.7469 21.1926 -0.9692 0 0 0.257066</pose>
-        <geometry><box><size>34.5073 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_31">
-        <pose>-83.2723 -4.4289 -0.9692 0 0 -0.888525</pose>
-        <geometry><box><size>75.9883 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_32">
-        <pose>-34.6318 -40.9642 -0.9692 0 0 -0.275773</pose>
-        <geometry><box><size>50.9643 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_33">
-        <pose>-5.6817 -52.4388 -0.9692 0 0 -0.790496</pose>
-        <geometry><box><size>13.0016 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_34">
-        <pose>16.5963 -92.2088 -0.9692 0 0 -1.103799</pose>
-        <geometry><box><size>78.9140 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_35">
-        <pose>56.2424 -136.8616 -0.9692 0 0 -0.403323</pose>
-        <geometry><box><size>47.2288 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_36">
-        <pose>88.2480 -157.6178 -0.9692 0 0 -0.838588</pose>
-        <geometry><box><size>31.1143 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_37">
-        <pose>101.1760 -167.6389 -0.9692 0 0 0.650539</pose>
-        <geometry><box><size>5.2511 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_38">
-        <pose>106.3454 -169.1033 -0.9692 0 0 -0.721086</pose>
-        <geometry><box><size>9.2971 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_39">
-        <pose>111.2621 -176.5093 -0.9692 0 0 -1.381083</pose>
-        <geometry><box><size>9.4544 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_40">
-        <pose>122.0331 -177.5513 -0.9692 0 0 0.374693</pose>
-        <geometry><box><size>21.6625 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_41">
-        <pose>136.1866 -175.2341 -0.9692 0 0 -0.364850</pose>
-        <geometry><box><size>9.2245 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_42">
-        <pose>143.2637 -182.5471 -0.9692 0 0 -1.202505</pose>
-        <geometry><box><size>13.0510 0.650 3.038</size></box></geometry>
-      </collision>
-      <collision name="bank_43">
-        <pose>148.2965 -186.0154 -0.9692 0 0 0.822037</pose>
-        <geometry><box><size>8.0755 0.650 3.038</size></box></geometry>
-      </collision>
+      <!-- Vertical hula hoop, 1 m opening, centre ENU (6, 0, -4.626).
+           Visual only: the tube is not a collision. -->
+      <visual name="hoop_seg_0"><pose>6 0.000 -4.126 -1.5708 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_1"><pose>6 0.250 -4.193 -2.0944 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_2"><pose>6 0.433 -4.376 -2.6180 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_3"><pose>6 0.500 -4.626 -3.1416 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_4"><pose>6 0.433 -4.876 -3.6652 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_5"><pose>6 0.250 -5.059 -4.1888 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_6"><pose>6 0.000 -5.126 -4.7124 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_7"><pose>6 -0.250 -5.059 -5.2360 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_8"><pose>6 -0.433 -4.876 -5.7596 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_9"><pose>6 -0.500 -4.626 -6.2832 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_10"><pose>6 -0.433 -4.376 -6.8068 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
+      <visual name="hoop_seg_11"><pose>6 -0.250 -4.193 -7.3304 0 0</pose><cast_shadows>false</cast_shadows><geometry><cylinder><radius>0.045</radius><length>0.28</length></cylinder></geometry><material><ambient>0.95 0.40 0.05 1</ambient><diffuse>0.95 0.45 0.08 1</diffuse><emissive>0.20 0.06 0 1</emissive></material></visual>
     </link>
   </model>
 </sdf>

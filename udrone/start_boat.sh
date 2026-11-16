@@ -22,6 +22,7 @@ pkill -f 'xudrone_camera_bridge|front_camera_link/sensor/front_camera' 2>/dev/nu
 pkill -f 'xudrone_down_camera_bridge|xudrone.*/down_camera' 2>/dev/null || true
 pkill -f 'xudrone_up_camera_bridge|xudrone.*/up_camera' 2>/dev/null || true
 pkill -f 'xudrone_range_bridge|lidar_sensor_link|surface_range_link' 2>/dev/null || true
+pkill -f 'xudrone_mapping|xudrone_mapper|xudrone_octomap' 2>/dev/null || true
 pkill -f 'otter_k_down_camera_bridge|heron_0.*/down_camera' 2>/dev/null || true
 pkill -f 'apriltag_node|tag_detector|run_tags' 2>/dev/null || true
 pkill -f 'coral_behaviours|udrone_boat/behaviours/coral_behaviours' 2>/dev/null || true
@@ -58,11 +59,8 @@ setsid nohup env GZ_PARTITION=aquatic UDRONE_GZ_MODEL=xudrone_1 \
   exec /usr/local/bin/coral_behaviours.sh
 ) >> /root/log/coral_behaviours.log 2>&1 &
 
-# Down-camera bridges + AprilTag stacks (boat + AUV; Tempe/Locutus workflow).
-(
-  sleep 20
-  exec /usr/local/bin/otter_k_down_camera_bridge.sh
-) >> /root/log/otter_k_down_camera.log 2>&1 &
+# xudrone cameras only. otter_k has no camera, so there is no boat bridge
+# and no AprilTag stack on the boat.
 (
   sleep 28
   # Secondary AUV model is xudrone_1 when launched from the boat twin.
@@ -72,10 +70,6 @@ setsid nohup env GZ_PARTITION=aquatic UDRONE_GZ_MODEL=xudrone_1 \
   sleep 30
   GZ_MODEL_NAME=xudrone_1 exec /usr/local/bin/xudrone_up_camera_bridge.sh
 ) >> /root/log/xudrone_up_camera.log 2>&1 &
-(
-  sleep 35
-  exec /usr/local/bin/coral_tags.sh otter_k
-) >> /root/log/coral_tags.log 2>&1 &
 (
   sleep 40
   exec /usr/local/bin/coral_tags_xudrone.sh

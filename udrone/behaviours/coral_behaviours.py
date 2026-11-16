@@ -36,11 +36,19 @@ Commands:
       Hold under otter_k: the upward camera watches AprilTag 10 on the
       underside of the deck, and the force loop keeps a metre below it.
       Rejected while the latch is attached. Phrase: xudrone: track otter_k.
+  {"type":"rendezvous","id"?}
+      Search under otter_k with the upward camera, servo onto AprilTag 10
+      on the deck, and latch into the nest. Phrase: xudrone: rendezvous with otter-k.
+      If the latch is already attached, the behaviour reports landed.
   {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?,
    "z_top"?, "z_bottom"?, "speed_mps"?, "heading_deg"?,
-   "center_east_m"?, "center_north_m"?, "until"?: "tag_detected", "id"?}
+   "center_east_m"?, "center_north_m"?, "until"?: "tag_detected",
+   "plan"?: "map"|"lawnmower", "target"?: "bed"|"camera", "id"?}
       AUV 3D lawnmower (boustrophedon at several depths). Same force→hull
       loop as helix; path centred on thrust-on pose, or on world ENU centre.
+      plan=map asks xudrone_mapper for a costmap-aware path over unmapped
+      bed (or uncovered camera cells) and falls back to the lawnmower if
+      the mapper does not answer.
       until tag_detected ends early when /coral/detections reports a tag
       (xudrone nadir camera + apriltag stack).
   {"type":"abort","id"?}
@@ -48,7 +56,7 @@ Commands:
 
 Events:
   {"type":"accepted"|"rejected"|"failed"|"arrived"|"survey_done"|"dock_done"|
-   "helix_done"|"swim_done"|"hoop_done"|"track_done"|"coverage_done"|"aborted", "id", ...}
+   "helix_done"|"swim_done"|"hoop_done"|"track_done"|"rendezvous_done"|"coverage_done"|"aborted", "id", ...}
 
 Status (1 Hz): busy, phase, latch, boat/auv pose, active_id, last_event.
 
@@ -59,6 +67,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -87,11 +96,13 @@ from udrone_sinusoidal_controller import (  # noqa: E402
     GZ_ENV,
     GzPoses,
     LatchState,
+    baton_owner,
     detect_target,
     rpy_from_q,
 )
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from patterns import lawnmower  # noqa: E402
+from shape_geom import cruise_speed  # noqa: E402
 
 NS_BOAT = "/otter_k/fmu"
 FORCE_ARM = 21196.0
@@ -111,6 +122,8 @@ def _new_id() -> str:
 class CoralBehaviours(Node):
     def __init__(self):
         super().__init__("coral_behaviours")
+        # AUV steps hand the armed vehicle on (run_hold.py) instead of disarming.
+        os.environ.setdefault("UDRONE_KEEP_ARMED", "1")
         self.gz = GzPoses()
         self.latch = LatchState()
         self.boat_model = "heron_0"
@@ -233,6 +246,7 @@ class CoralBehaviours(Node):
             "boat": boat_s,
             "auv": auv_s,
             "auv_model": self.auv_model,
+            "auv_holding": baton_owner(self.auv_model) is not None,
             "sim_t": sim_t if fresh else None,
             "last_event": (self.last_event or {}).get("type"),
             "last_detection": self.last_detection,
@@ -329,12 +343,16 @@ class CoralBehaviours(Node):
             self._start_survey(cmd)
         elif kind == "helix":
             self._start_helix(cmd)
+        elif kind == "shape":
+            self._start_shape(cmd)
         elif kind == "swim":
             self._start_swim(cmd)
         elif kind == "hoop":
             self._start_hoop(cmd)
         elif kind == "track":
             self._start_track(cmd)
+        elif kind == "rendezvous":
+            self._start_rendezvous(cmd)
         elif kind == "coverage":
             self._start_coverage(cmd)
         elif kind in ("approach_tag", "approach"):
@@ -344,13 +362,51 @@ class CoralBehaviours(Node):
         else:
             self._emit({"type": "rejected", "id": cid, "reason": f"unknown type {kind}"})
 
-    def _abort(self, cid, reason="abort"):
-        if self._helix_proc is not None and self._helix_proc.poll() is None:
-            self._helix_proc.terminate()
+    def _auv_disarm(self):
+        """Disarm the AUV and leave offboard. Same end state as a finished swim."""
+        commander = os.environ.get(
+            "UDRONE_PX4_COMMANDER",
+            "/root/PX4-Autopilot/build/px4_sitl_default/bin/px4-commander",
+        )
+        if not os.path.isfile(commander):
+            return
+        inst = str(self.auv_px4)
+        for args in (["disarm", "-f"], ["mode", "manual"]):
             try:
-                self._helix_proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._helix_proc.kill()
+                subprocess.run(
+                    [commander, "--instance", inst, *args],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=4,
+                )
+            except (OSError, subprocess.TimeoutExpired) as ex:
+                self.get_logger().warning(f"auv disarm ({args[0]}) failed: {ex}")
+
+    def _kill_auv_proc(self):
+        if self._helix_proc is None or self._helix_proc.poll() is not None:
+            return
+        # SIGTERM asks the controller to disarm on its next tick. This call
+        # does it too, in case the process is already stuck.
+        self._auv_disarm()
+        self._helix_proc.terminate()
+        try:
+            self._helix_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._helix_proc.kill()
+
+    def _stop_holder(self) -> bool:
+        """SIGTERM the hold runner keeping the AUV armed between steps; it disarms."""
+        pid = baton_owner(self.auv_model)
+        if pid is None:
+            return False
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return False
+        self.get_logger().info(f"stopped the AUV hold runner pid {pid}")
+        return True
+
+    def _abort(self, cid, reason="abort"):
+        self._kill_auv_proc()
+        self._stop_holder()
         if self.phase == "goto" and self._boat_armed():
             self._boat_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM,
                                param1=0.0, param2=FORCE_ARM)
@@ -367,11 +423,8 @@ class CoralBehaviours(Node):
         cid = cmd["id"]
         reason = str(cmd.get("reason") or "reset")
         was = self.phase
-        if self._helix_proc is not None and self._helix_proc.poll() is None:
-            try:
-                self._helix_proc.terminate()
-            except Exception:
-                pass
+        self._kill_auv_proc()
+        self._stop_holder()
         self._clear_job()
         self._emit({"type": "accepted", "id": cid, "command": "reset",
                     "reason": reason, "was": was})
@@ -403,8 +456,15 @@ class CoralBehaviours(Node):
             self._emit({"type": "arrived", "id": self.active_id or cid, "held": True,
                         "east_m": None, "north_m": None})
             self._clear_job()
-        else:
-            self._emit({"type": "accepted", "id": cid, "command": "hold", "note": "nothing to hold"})
+            return
+        if self._helix_proc is not None and self._helix_proc.poll() is None:
+            self._abort(cid, reason="hold")
+            return
+        if baton_owner(self.auv_model) is not None:
+            self._emit({"type": "accepted", "id": cid, "command": "hold",
+                        "note": "xudrone is already holding station, armed"})
+            return
+        self._emit({"type": "accepted", "id": cid, "command": "hold", "note": "nothing to hold"})
 
     def _clear_job(self):
         self.phase = "idle"
@@ -425,6 +485,7 @@ class CoralBehaviours(Node):
                         "reason": "dock.action must be attach|detach"})
             return
         want = "attached" if action == "attach" else "detached"
+        self._stop_holder()
         self.busy = True
         self.phase = "dock"
         self.active_id = cmd["id"]
@@ -752,6 +813,47 @@ class CoralBehaviours(Node):
         }
         self._spawn_auv("helix", cmd["id"], runner, env, meta, "/tmp/coral_helix.log")
 
+    def _start_shape(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "shape rejected: xudrone is latched; detach first"})
+            return
+        shape = str(cmd.get("shape") or "infinity")
+        try:
+            size = float(cmd.get("size_m", cmd.get("radius_m", 3.0)) or 3.0)
+            loops = float(cmd.get("loops", 2.0) or 2.0)
+            z0 = float(cmd.get("z0", -1.2) or -1.2)
+            raw_speed = cmd.get("speed_mps")
+            speed = None if raw_speed in (None, "") else float(raw_speed)
+        except (TypeError, ValueError):
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "shape size, loops, and speed must be numbers"})
+            return
+        if speed is not None:
+            speed = max(0.05, speed)
+        runner = os.environ.get(
+            "UDRONE_SHAPE_RUNNER",
+            "/root/udrone_boat/behaviours/run_shape.py",
+        )
+        env = {
+            **os.environ,
+            "GZ_PARTITION": os.environ.get("GZ_PARTITION", "aquatic"),
+            "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "84"),
+            "UDRONE_SHAPE": shape,
+            "UDRONE_SHAPE_SIZE": str(size),
+            "UDRONE_SHAPE_LOOPS": str(loops),
+            "UDRONE_SHAPE_Z": str(z0),
+            "UDRONE_GZ_MODEL": self.auv_model,
+            "UDRONE_PX4_INSTANCE": str(self.auv_px4),
+            "UDRONE_HELIX_BEHAVIOUR": "1",
+        }
+        if speed is not None:
+            env["UDRONE_SHAPE_SPEED"] = str(speed)
+        meta = {"shape": shape, "size_m": size, "loops": loops, "z0": z0}
+        if speed is not None:
+            meta["speed_mps"] = speed
+        self._spawn_auv("shape", cmd["id"], runner, env, meta, "/tmp/coral_shape.log")
+
     def _start_swim(self, cmd):
         if self.latch.state == "attached":
             self._emit({"type": "rejected", "id": cmd["id"],
@@ -769,8 +871,9 @@ class CoralBehaviours(Node):
             east = float(cmd.get("east_m", 0.0) or 0.0)
             along = cmd.get("along_heading_m")
             along_f = None if along is None else float(along)
-            speed = float(cmd.get("speed_mps", os.environ.get("UDRONE_SWIM_SPEED", "0.20")))
-            arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_SWIM_ARRIVE", "1.0")))
+            raw_speed = cmd.get("speed_mps", os.environ.get("UDRONE_SWIM_SPEED", ""))
+            speed = cruise_speed() if raw_speed in (None, "") else float(raw_speed)
+            arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_SWIM_ARRIVE", "0.35")))
         except (TypeError, ValueError):
             self._emit({"type": "rejected", "id": cmd["id"],
                         "reason": "swim offsets and speed must be numbers"})
@@ -790,9 +893,9 @@ class CoralBehaviours(Node):
             self._emit({"type": "rejected", "id": cmd["id"],
                         "reason": "swim leg is longer than 60 m"})
             return
-        if speed <= 0.0 or speed > 0.5:
+        if speed <= 0.0:
             self._emit({"type": "rejected", "id": cmd["id"],
-                        "reason": "swim.speed_mps must be in (0, 0.5]"})
+                        "reason": "swim.speed_mps must be positive"})
             return
         depth = cmd.get("depth_m", cmd.get("z0"))
         if depth not in (None, ""):
@@ -900,6 +1003,28 @@ class CoralBehaviours(Node):
             env["UDRONE_TRACK_STANDOFF"] = str(float(cmd["standoff_m"]))
         self._spawn_auv("track", cmd["id"], runner, env, {}, "/tmp/coral_track.log")
 
+    def _start_rendezvous(self, cmd):
+        runner = os.environ.get(
+            "UDRONE_RENDEZVOUS_RUNNER",
+            "/root/udrone_boat/behaviours/run_rendezvous.py",
+        )
+        if not os.path.isfile(runner):
+            here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_rendezvous.py")
+            if not os.path.isfile(here):
+                self._emit({"type": "rejected", "id": cmd["id"],
+                            "reason": f"rendezvous runner not found ({runner})"})
+                return
+            runner = here
+        env = {
+            **os.environ,
+            "GZ_PARTITION": os.environ.get("GZ_PARTITION", "aquatic"),
+            "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "84"),
+            "UDRONE_GZ_MODEL": self.auv_model,
+            "UDRONE_PX4_INSTANCE": str(self.auv_px4),
+            "UDRONE_HELIX_BEHAVIOUR": "1",
+        }
+        self._spawn_auv("rendezvous", cmd["id"], runner, env, {}, "/tmp/coral_rendezvous.log")
+
     def _start_coverage(self, cmd):
         width = float(cmd.get("width_m", os.environ.get("UDRONE_COV_WIDTH", "12")))
         length = float(cmd.get("length_m", cmd.get("width_m",
@@ -952,12 +1077,23 @@ class CoralBehaviours(Node):
         if ce is not None and cn is not None:
             env["UDRONE_COV_CENTER_E"] = str(float(ce))
             env["UDRONE_COV_CENTER_N"] = str(float(cn))
+        plan = cmd.get("plan")
+        target = cmd.get("target", "bed")
+        if plan not in (None, "", "map", "lawnmower") or target not in ("bed", "camera"):
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "coverage.plan must be map|lawnmower and target bed|camera"})
+            return
+        if plan == "map":
+            env["UDRONE_COV_PLAN"] = "map"
+            env["UDRONE_COV_TARGET"] = target
         meta = {
             "width_m": width, "length_m": length, "swath_m": swath,
             "layers": layers, "z_top": z_top, "z_bottom": z_bottom,
             "speed_mps": speed, "heading_deg": heading,
             "until": until or None,
         }
+        if plan == "map":
+            meta.update(plan="map", target=target)
         if ce is not None and cn is not None:
             meta["center_east_m"] = float(ce)
             meta["center_north_m"] = float(cn)
@@ -970,6 +1106,10 @@ class CoralBehaviours(Node):
         tag_id = int(float(cmd.get("tag_id", 0)))
         standoff = float(cmd.get("standoff_m", os.environ.get("UDRONE_APPROACH_STANDOFF", "1.5")))
         depth = float(cmd.get("depth_m", os.environ.get("UDRONE_APPROACH_DEPTH", "-1.2")))
+        # depth_m is metres below the surface, the same words as a swim.
+        # A value that is already a world-z (negative) is left alone.
+        if depth > 0.0:
+            depth = -depth
         arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_APPROACH_ARRIVE", "0.5")))
         depth_tol = float(cmd.get("depth_tol_m", os.environ.get("UDRONE_APPROACH_DEPTH_TOL", "0.25")))
         speed = float(cmd.get("speed_mps", os.environ.get("UDRONE_APPROACH_SPEED", "0.25")))
@@ -1054,15 +1194,6 @@ class CoralBehaviours(Node):
             meta["center_north_m"] = float(cn)
         self._spawn_auv("approach", cmd["id"], runner, env, meta, "/tmp/coral_approach.log")
 
-    def _kill_auv_proc(self):
-        if self._helix_proc is None or self._helix_proc.poll() is not None:
-            return
-        self._helix_proc.terminate()
-        try:
-            self._helix_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._helix_proc.kill()
-
     def _finish_coverage(self, tag_detected: bool, detection=None):
         meta = dict(self._helix_meta or {})
         cid = self.active_id
@@ -1132,7 +1263,7 @@ class CoralBehaviours(Node):
             self._tick_dock()
         elif self.phase in ("goto", "survey"):
             self._tick_goto()
-        elif self.phase in ("helix", "swim", "hoop", "track", "coverage", "approach"):
+        elif self.phase in ("helix", "swim", "hoop", "track", "rendezvous", "coverage", "approach", "shape"):
             self._tick_auv()
 
     def destroy_node(self):

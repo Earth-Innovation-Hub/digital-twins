@@ -26,6 +26,7 @@ def main():
     node = UdroneHelixController(
         duration_s=duration, radius=radius, omega=omega, x_rate=x_rate, z0=z0,
     )
+    node.pitch_limit = None
     ok = False
     try:
         spin_until_done(node)

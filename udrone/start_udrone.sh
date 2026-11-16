@@ -79,6 +79,18 @@ start_camera_bridge() {
       GZ_MODEL_NAME="$0" exec /usr/local/bin/xudrone_range_bridge.sh
     ' "$1" >> /root/log/xudrone_range_bridge.log 2>&1 < /dev/null &
   )
+  (
+    setsid bash -c '
+      for _ in $(seq 1 120); do
+        if gz topic -l 2>/dev/null | grep -q "$0.*sonar_link.*sonar/scan"; then
+          break
+        fi
+        sleep 1
+      done
+      sleep 5
+      exec /usr/local/bin/xudrone_mapping.sh
+    ' "$1" >> /root/log/xudrone_mapping.log 2>&1 < /dev/null &
+  )
 }
 
 boat_pose() {

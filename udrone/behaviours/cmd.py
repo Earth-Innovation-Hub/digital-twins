@@ -11,6 +11,7 @@ Examples:
   coral_cmd.py swim --north 10
   coral_cmd.py hoop
   coral_cmd.py track --duration 90 --standoff 1
+  coral_cmd.py rendezvous
   coral_cmd.py coverage --width 12 --length 12 --layers 3
   coral_cmd.py approach_tag --standoff 1.5 --timeout 60
   coral_cmd.py survey --width 20 --length 20 --until tag_detected
@@ -33,8 +34,8 @@ CMD = "/coral/command"
 EVT = "/coral/event"
 STS = "/coral/status"
 TERMINAL = {
-    "arrived", "dock_done", "helix_done", "swim_done", "hoop_done", "track_done",
-    "coverage_done", "approach_done", "survey_done", "failed", "rejected",
+    "arrived", "dock_done", "helix_done", "shape_done", "swim_done", "hoop_done", "track_done",
+    "rendezvous_done", "coverage_done", "approach_done", "survey_done", "failed", "rejected",
     "aborted",
 }
 
@@ -70,7 +71,7 @@ def spin_for(node, seconds):
 def main(argv=None):
     p = argparse.ArgumentParser(description="Send a CoRAL behaviour command")
     p.add_argument("type", choices=(
-        "dock", "goto", "helix", "swim", "hoop", "track", "coverage", "approach_tag",
+        "dock", "goto", "helix", "shape", "swim", "hoop", "track", "rendezvous", "coverage", "approach_tag",
         "survey", "abort", "hold", "status",
     ))
     p.add_argument("action", nargs="?", help="attach|detach for dock")
@@ -86,6 +87,8 @@ def main(argv=None):
     p.add_argument("--timeout", type=float, default=None)
     p.add_argument("--duration", type=float, default=None)
     p.add_argument("--radius", type=float, default=None)
+    p.add_argument("--shape", default=None, help="infinity|orbit|loop")
+    p.add_argument("--loops", type=float, default=None)
     p.add_argument("--omega", type=float, default=None)
     p.add_argument("--vx", type=float, default=None)
     p.add_argument("--z0", type=float, default=None)
@@ -102,6 +105,10 @@ def main(argv=None):
                    help="survey/coverage lane heading degrees")
     p.add_argument("--until", default=None,
                    help="survey/coverage stop condition (tag_detected)")
+    p.add_argument("--plan", default=None, choices=("map", "lawnmower"),
+                   help="coverage planner: map (costmap + gaps) or lawnmower")
+    p.add_argument("--target", default=None, choices=("bed", "camera"),
+                   help="coverage map target: unmapped bed or uncovered camera footprint")
     p.add_argument("--standoff", type=float, default=None,
                    help="approach_tag optical standoff_m")
     p.add_argument("--tag-id", type=int, default=None, dest="tag_id",
@@ -176,6 +183,16 @@ def main(argv=None):
         for val, key in mapping:
             if val is not None:
                 cmd[key] = val
+    elif args.type == "shape":
+        cmd["shape"] = args.shape or "infinity"
+        if args.radius is not None:
+            cmd["size_m"] = args.radius
+        if args.loops is not None:
+            cmd["loops"] = args.loops
+        if args.z0 is not None:
+            cmd["z0"] = args.z0
+        if args.speed is not None:
+            cmd["speed_mps"] = args.speed
     elif args.type == "swim":
         if args.along is not None:
             cmd["along_heading_m"] = args.along
@@ -202,6 +219,8 @@ def main(argv=None):
             cmd["duration_s"] = args.duration
         if args.standoff is not None:
             cmd["standoff_m"] = args.standoff
+    elif args.type == "rendezvous":
+        pass
     elif args.type == "survey":
         if args.width is None or args.length is None:
             print("survey requires --width and --length", file=sys.stderr)
@@ -245,6 +264,10 @@ def main(argv=None):
             cmd["heading_deg"] = args.heading_deg
         if args.until:
             cmd["until"] = args.until
+        if args.plan:
+            cmd["plan"] = args.plan
+        if args.target:
+            cmd["target"] = args.target
         if args.world:
             cmd["center_east_m"] = args.east
             cmd["center_north_m"] = args.north
@@ -310,7 +333,7 @@ def main(argv=None):
     if terminal.get("type") in ("failed", "rejected"):
         ok = False
     if terminal.get("type") in (
-        "helix_done", "swim_done", "hoop_done", "track_done",
+        "helix_done", "swim_done", "hoop_done", "track_done", "rendezvous_done",
         "coverage_done", "approach_done",
     ) and terminal.get("failed"):
         ok = False

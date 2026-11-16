@@ -4,7 +4,9 @@
 Same force → point-hull control as the helix and coverage swims. The path is
 two points in the thrust-on frame: the arm pose, then the compass or
 heading offset. Depth stays at the depth when thrust starts unless depth_m
-is set. Coral command type ``swim``.
+is set. The pace speeds up at ACCEL_MPS2, cruises, and slows to a stop on the
+end point, and the reference waits for the hull when it falls behind. Coral
+command type ``swim``.
 """
 from __future__ import annotations
 
@@ -16,8 +18,11 @@ sys.path.insert(0, os.environ.get("UDRONE_SRC", "/root/udrone_boat/src"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rclpy
-from patterns import path_length_3d, polyline_pos_vel, swim_path_end
+from patterns import path_length_3d, swim_path_end, trapezoid, trapezoid_time
+from shape_geom import cruise_speed
 from udrone_sinusoidal_controller import UdroneHelixController, spin_until_done
+
+ACCEL_MPS2 = 1.5
 
 
 def _env_float(name, default=None):
@@ -36,7 +41,7 @@ class UdroneSwimController(UdroneHelixController):
         relative_to="current",
         depth_m=None,
         speed_mps=0.20,
-        arrive_m=1.0,
+        arrive_m=0.35,
         **kwargs,
     ):
         self.swim_north = float(north_m)
@@ -59,6 +64,8 @@ class UdroneSwimController(UdroneHelixController):
         kwargs.setdefault("x_rate", self.swim_speed)
         kwargs.setdefault("z0", self.swim_depth if self.swim_depth is not None else -1.2)
         super().__init__(**kwargs)
+        self.progress_gate = True
+        self._length = 0.0
         self.get_logger().info(
             f"swim: rel={self.swim_rel} north={self.swim_north:g} east={self.swim_east:g} "
             f"along={self.swim_along} depth={self.swim_depth} speed={self.swim_speed:g} "
@@ -85,8 +92,9 @@ class UdroneSwimController(UdroneHelixController):
         self._target_world = (x0 + c * fwd - s * left, y0 + s * fwd + c * left, z_des)
         self._wps = [(0.0, 0.0, z_now), (fwd, left, z_des)]
         length = path_length_3d(self._wps)
-        self._path_time = length / max(self.swim_speed, 0.05)
-        self.duration_s = self._path_time + 40.0
+        self._length = length
+        self._path_time = trapezoid_time(length, max(self.swim_speed, 0.05), ACCEL_MPS2)
+        self.duration_s = 2.0 * self._path_time + 30.0
         self._built = True
         print(
             f"SWIM_PATH len={length:.1f} m time≈{self._path_time:.1f} s "
@@ -100,7 +108,16 @@ class UdroneSwimController(UdroneHelixController):
         if not self._wps:
             z = self.swim_depth if self.swim_depth is not None else -1.2
             return (0.0, 0.0, z), (0.0, 0.0, 0.0)
-        return polyline_pos_vel(self._wps, self.swim_speed, tm)
+        a, b = self._wps
+        if self._length < 1e-6:
+            return tuple(b), (0.0, 0.0, 0.0)
+        u = tuple((b[i] - a[i]) / self._length for i in range(3))
+        s, v, acc = trapezoid(self._length, max(self.swim_speed, 0.05), ACCEL_MPS2, tm)
+        return (
+            tuple(a[i] + u[i] * s for i in range(3)),
+            tuple(u[i] * v for i in range(3)),
+            tuple(u[i] * acc for i in range(3)),
+        )
 
     def _close(self) -> bool:
         if self._target_world is None or self._prev is None:
@@ -113,9 +130,9 @@ class UdroneSwimController(UdroneHelixController):
         if not self._built:
             return False
         if tm > 1.0 and self._close():
-            print(f"SWIM_ARRIVE miss={self._miss:.2f} m t={tm:.1f}", flush=True)
+            print(f"SWIM_ARRIVE miss={self._miss:.2f} m t={tm:.1f} path_t={self.path_t:.1f}", flush=True)
             return True
-        if tm >= self._path_time + 15.0:
+        if self.path_t >= self._path_time + 15.0 or tm >= self.duration_s:
             if not self._close():
                 self._fail(f"swim missed the end by {self._miss:.1f} m")
             return True
@@ -127,8 +144,8 @@ def main():
     east = _env_float("UDRONE_SWIM_EAST", 0.0)
     along = _env_float("UDRONE_SWIM_ALONG", None)
     depth = _env_float("UDRONE_SWIM_DEPTH", None)
-    speed = _env_float("UDRONE_SWIM_SPEED", 0.20)
-    arrive = _env_float("UDRONE_SWIM_ARRIVE", 1.0)
+    speed = _env_float("UDRONE_SWIM_SPEED", cruise_speed())
+    arrive = _env_float("UDRONE_SWIM_ARRIVE", 0.35)
     rel = os.environ.get("UDRONE_SWIM_REL", "current")
 
     rclpy.init()
@@ -147,7 +164,7 @@ def main():
             mean_rotor = sum(abs(v) for v in rotor) / len(rotor)
             if mean_rotor < 0.2:
                 why = "thrusters were not driven"
-            elif node._miss > max(node.swim_arrive, 1.5):
+            elif node._miss > node.swim_arrive:
                 why = f"ended {node._miss:.1f} m from the target"
             else:
                 ok = True

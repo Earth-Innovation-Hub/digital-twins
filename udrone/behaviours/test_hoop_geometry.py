@@ -5,6 +5,8 @@ from hoop_geom import (
     HOOP_CENTER,
     RING_OUTER_M,
     SEARCH_HITS,
+    SEARCH_Z,
+    DEPTH_LO,
     CoverageMap,
     debug_caption,
     horizontal_axis,
@@ -33,9 +35,10 @@ def main():
 
     # The centre is in the opening; a point out at the rim is not.
     assert in_opening(HOOP_CENTER, HOOP_CENTER)
-    assert in_opening((6.1, 0.1, -0.95), HOOP_CENTER)
-    assert not in_opening((6.0, 0.45, -1.0), HOOP_CENTER)
-    assert not in_opening((4.0, 0.0, -1.0), HOOP_CENTER)
+    z = HOOP_CENTER[2]
+    assert in_opening((6.1, 0.1, z + 0.05), HOOP_CENTER)
+    assert not in_opening((6.0, 0.45, z), HOOP_CENTER)
+    assert not in_opening((4.0, 0.0, z), HOOP_CENTER)
 
     # Level hull at the origin, facing east. The major axis is the outer diameter.
     fx = fy = 400.0
@@ -86,6 +89,11 @@ def main():
     assert min(talong) > -0.5 and talong[-1] > 4.0
     hold, _hax = fly_trajectory((2.0, 0.4, -0.8), (1.0, 0.0), (6.0, 0.0, -1.0), through=False)
     assert hold[-1][0] < 6.0
+    # The pass flies at the ring's own depth, also for the deep Kiwanis hoop.
+    deep, _dax = fly_trajectory((2.0, 0.0, -4.0), (1.0, 0.0), (6.0, 0.0, SEARCH_Z), through=True)
+    assert abs(deep[-1][2] - SEARCH_Z) < 1e-9 and abs(deep[-2][2] - SEARCH_Z) < 1e-9
+    dsweep, _ = sweep_points((2.0, 0.0, -4.0), (6.0, 0.0, SEARCH_Z))
+    assert abs(dsweep[3][2] - SEARCH_Z) < 1e-9
     cap = debug_caption("search", "lead", 20, 3.4, (6.0, 0.1, -1.0), 0.55, 9.0, False, False)
     assert cap[0].startswith("search lead") and "3.4" in cap[0] and "6.0" in cap[1]
     assert len(cap) == 2
@@ -115,20 +123,22 @@ def main():
     assert abs(_xl - 0.05) < 1e-9
 
     # Facing east at hoop depth, the wedge marks cells 1.5–6 m ahead and ignores the bed.
-    grid = CoverageMap(0.0, 0.0)
+    # The behaviour default cell is 2.07 m. This fixture stays on a 2 m grid so the
+    # cell indexes below keep their meaning.
+    grid = CoverageMap(0.0, 0.0, res=2.0)
     hoop_cell = (3, 0)  # east [6, 8), the cell that contains the hoop's east edge
     assert hoop_cell in grid.cells, len(grid.cells)
     grid.mark_wedge(2.0, 0.0, 0.0, -0.2, 0.0)
     assert grid.done_count() == 0 and all(v == 0 for v in grid.hits.values())
-    grid.mark_wedge(2.0, 0.0, 0.0, -1.0, 0.0)
+    grid.mark_wedge(2.0, 0.0, 0.0, SEARCH_Z, 0.0)
     assert grid.hits.get(hoop_cell) == 1, grid.hits
     assert grid.hits.get((2, 0)) == 1  # centre (5, 1), 3 m ahead
     assert grid.hits.get((3, 1)) == 1  # about 31° off the nose, inside the camera view
     assert grid.hits.get((1, 0), 0) == 0  # centre (3, 1) is inside the near cutoff
-    grid.mark_wedge(2.0, 0.0, 0.0, -2.2, 1.0)  # a bed view drops the look timer
-    grid.mark_wedge(2.0, 0.0, 0.0, -1.0, 1.2)
+    grid.mark_wedge(2.0, 0.0, 0.0, DEPTH_LO - 0.8, 1.0)  # below the band drops the look timer
+    grid.mark_wedge(2.0, 0.0, 0.0, SEARCH_Z, 1.2)
     assert grid.hits.get(hoop_cell) == 1
-    grid.mark_wedge(2.0, 0.0, 0.0, -1.0, 1.2 + 1.5)
+    grid.mark_wedge(2.0, 0.0, 0.0, SEARCH_Z, 1.2 + 1.5)
     assert grid.hits.get(hoop_cell) == SEARCH_HITS
 
     nxt = grid.nearest_open(2.0, 0.0, 0.0)

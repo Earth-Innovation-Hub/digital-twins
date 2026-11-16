@@ -2,8 +2,8 @@
 <sdf version="1.9">
   <world name="kiwanis_lake">
     <!-- Kiwanis Lake, Tempe AZ. Origin 33.37404719 N, -111.93958005 W (lake center).
-         Elev 335.28 m. ~12.67 acres. Depth dish 1.0→2.44 m.
-         Polygon visuals; tiled bed collision; no full-plane lawn under water. -->
+         Elev 335.28 m. ~12.67 acres. Bowl bed 1 m at the shore, 10 m at the deepest point.
+         Bed and park are pictures. No water mesh and no static collision. -->
     <physics type="ode">
       <max_step_size>0.002</max_step_size>
       <real_time_factor>1.0</real_time_factor>
@@ -80,8 +80,10 @@
     <light name="sun" type="directional">
       <pose>0 0 200 0 0 0</pose>
       <cast_shadows>false</cast_shadows>
-      <intensity>1</intensity>
+      <intensity>1.05</intensity>
       <direction>-0.45 0.25 -0.85</direction>
+      <diffuse>1.0 0.97 0.90 1</diffuse>
+      <specular>1.0 0.98 0.94 1</specular>
     </light>
   </world>
 </sdf>

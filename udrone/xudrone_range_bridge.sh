@@ -37,11 +37,14 @@ fi
 
 BOT=/world/$WORLD/model/$MODEL/link/lidar_sensor_link/sensor/lidar/scan
 SUR=/world/$WORLD/model/$MODEL/link/surface_range_link/sensor/surface_lidar/scan
+SON=/world/$WORLD/model/$MODEL/link/sonar_link/sensor/sonar/scan/points
 echo "$(date -u +%FT%TZ) xudrone range bridge MODEL=$MODEL bot=$BOT"
 
 exec ros2 run ros_gz_bridge parameter_bridge \
   "$BOT@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan" \
   "$SUR@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan" \
+  "$SON@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked" \
   --ros-args -r __node:=xudrone_range_bridge -r __ns:=/xudrone \
   -r "$BOT:=/xudrone/range/bottom" \
-  -r "$SUR:=/xudrone/range/surface"
+  -r "$SUR:=/xudrone/range/surface" \
+  -r "$SON:=/xudrone/sonar/points_raw"

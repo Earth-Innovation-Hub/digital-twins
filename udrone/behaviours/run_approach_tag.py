@@ -14,7 +14,10 @@ s = mean tag side length in pixels; s* = fx * tag_size_m / z_des
 (z_des = standoff along the optical axis, metres).
 
 Stages: search (expanding spiral) → approach → settle → done.
-On lost track: back to search (radius kept; grows until lock or budget).
+The front camera servos while the tag is ahead. Once the fix is under the
+hull the downward camera takes over, and a dark front frame is not a spiral
+while that camera still has the tag. On lost track from both cameras: back
+to search (radius kept; grows until lock or budget).
 """
 from __future__ import annotations
 
@@ -30,8 +33,10 @@ import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, LaserScan
 
+from servo_geom import choose_eye, nadir_body
 from udrone_sinusoidal_controller import (
     UdroneHelixController,
+    body_axes,
     clamp,
     rpy_from_q,
     spin_until_done,
@@ -66,7 +71,7 @@ AGL_MIN_M = float(os.environ.get("UDRONE_IBVS_AGL_MIN", "0.45"))       # keep of
 AGL_SOFT_M = float(os.environ.get("UDRONE_IBVS_AGL_SOFT", "0.90"))
 SURF_MIN_M = float(os.environ.get("UDRONE_IBVS_SURF_MIN", "0.35"))     # keep below free surface
 DEPTH_SHALLOW = float(os.environ.get("UDRONE_IBVS_DEPTH_SHALLOW", "-0.35"))  # world z
-DEPTH_DEEP = float(os.environ.get("UDRONE_IBVS_DEPTH_DEEP", "-1.85"))
+DEPTH_DEEP = float(os.environ.get("UDRONE_IBVS_DEPTH_DEEP", "-9.30"))
 RANGE_STALE_S = float(os.environ.get("UDRONE_IBVS_RANGE_STALE", "0.8"))
 
 
@@ -134,6 +139,13 @@ class UdroneApproachController(UdroneHelixController):
         self._det_s = None
         self._det_t = 0.0
         self._det_id = None
+        self._down_u = None
+        self._down_v = None
+        self._down_s = None
+        self._down_t = 0.0
+        self.dfx = self.dfy = 381.46
+        self.dcx, self.dcy = 320.0, 240.0
+        self._eye = "front"
 
         # EchoRanger (bottom AGL) + upward surface clearance (metres).
         self._agl_m = None
@@ -157,7 +169,8 @@ class UdroneApproachController(UdroneHelixController):
         self._search_r = self.search_r0
         self._search_t0 = None          # sim-tm when current search bout began
         self._search_total = 0.0        # accumulated search time (sim)
-        self._orbit_acc = 0.0           # integrated |yaw_rate| * dt → orbits
+        self._orbit_acc = 0.0           # integrated |heading change| while on the ring
+        self._heading_prev = None
         self._last_orbit_n = 0
         self._search_yaw_sign = 1.0
         self._last_search_tm = None
@@ -179,6 +192,15 @@ class UdroneApproachController(UdroneHelixController):
         self.create_subscription(
             LaserScan, surface_range_topic, self._on_surface_range, qos_profile_sensor_data
         )
+        down_topic = os.environ.get(
+            "UDRONE_APPROACH_DOWN_TOPIC", "/xudrone/detections_down",
+        )
+        down_info = os.environ.get(
+            "UDRONE_APPROACH_DOWN_INFO", "/xudrone/camera_down/camera_info",
+        )
+        self.create_subscription(
+            CameraInfo, down_info, self._on_down_info, qos_profile_sensor_data,
+        )
         if AprilTagDetectionArray is not None:
             self.create_subscription(
                 AprilTagDetectionArray,
@@ -186,25 +208,44 @@ class UdroneApproachController(UdroneHelixController):
                 self._on_apriltag,
                 qos_profile_sensor_data,
             )
+            self.create_subscription(
+                AprilTagDetectionArray,
+                down_topic,
+                self._on_down_tag,
+                qos_profile_sensor_data,
+            )
         else:
             self.get_logger().error("apriltag_msgs missing — IBVS cannot run")
+            down_topic = detections_topic
 
         self.get_logger().info(
             f"approach_tag IBVS+search: id={self.tag_id} z_des={self.z_des:g} m "
             f"R0={self.search_r0:g} Rmax={self.search_r_max:g} "
             f"budget={self.search_budget_s:g}s seed=({self._seed_e:g},{self._seed_n:g}) "
-            f"agl_min={AGL_MIN_M:g} surf_min={SURF_MIN_M:g} topic={detections_topic}"
+            f"agl_min={AGL_MIN_M:g} surf_min={SURF_MIN_M:g} "
+            f"topic={detections_topic} down={down_topic}"
         )
 
     # ---- vision ---------------------------------------------------------
     def _on_info(self, m: CameraInfo):
+        self._take_info(m, front=True)
+
+    def _on_down_info(self, m: CameraInfo):
+        self._take_info(m, front=False)
+
+    def _take_info(self, m: CameraInfo, front: bool):
         k = list(m.k) if m.k is not None else []
-        if len(k) >= 6:
-            self.fx = float(k[0]) or self.fx
-            self.fy = float(k[4]) or self.fy
-            self.cx = float(k[2]) if k[2] else (float(m.width) * 0.5)
-            self.cy = float(k[5]) if k[5] else (float(m.height) * 0.5)
+        if len(k) < 6:
+            return
+        fx = float(k[0]) or (self.fx if front else self.dfx)
+        fy = float(k[4]) or (self.fy if front else self.dfy)
+        cx = float(k[2]) if k[2] else (float(m.width) * 0.5)
+        cy = float(k[5]) if k[5] else (float(m.height) * 0.5)
+        if front:
+            self.fx, self.fy, self.cx, self.cy = fx, fy, cx, cy
             self._have_info = True
+        else:
+            self.dfx, self.dfy, self.dcx, self.dcy = fx, fy, cx, cy
 
     @staticmethod
     def _scan_range_m(msg: LaserScan):
@@ -317,11 +358,59 @@ class UdroneApproachController(UdroneHelixController):
     def _s_des(self) -> float:
         return self.fx * self.tag_size_m / self.z_des
 
+    def _on_down_tag(self, m: AprilTagDetectionArray):
+        if not m.detections:
+            return
+        best = None
+        for d in m.detections:
+            if int(d.id) != self.tag_id:
+                continue
+            best = d
+            break
+        if best is None:
+            return
+        side = _tag_side_px(best.corners)
+        if side < 1.0:
+            return
+        self._down_u = float(best.centre.x)
+        self._down_v = float(best.centre.y)
+        self._down_s = side
+        self._down_t = time.time()
+        self._had_tag = True
+
     def _fresh_det(self) -> bool:
         return (
             self._det_u is not None
             and (time.time() - self._det_t) <= LOST_S
         )
+
+    def _fresh_down(self) -> bool:
+        return (
+            self._down_u is not None
+            and (time.time() - self._down_t) <= LOST_S
+        )
+
+    def _down_feature(self, pos, q):
+        """World point of the nadir tag, or None when that camera is dark."""
+        if not self._fresh_down() or pos is None or q is None:
+            return None
+        x_n = (self._down_u - self.dcx) / max(self.dfx, 1e-3)
+        y_n = (self._down_v - self.dcy) / max(self.dfy, 1e-3)
+        z_opt = self.dfx * self.tag_size_m / max(self._down_s, 1.0)
+        if not math.isfinite(z_opt) or z_opt > 20.0:
+            return None
+        bx, by, bz = nadir_body(x_n, y_n, z_opt)
+        fwd, left, up = body_axes(q)
+        return tuple(
+            float(pos[i]) + bx * fwd[i] + by * left[i] + bz * up[i]
+            for i in range(3)
+        )
+
+    def _select_eye(self, pos, q):
+        feature = self._down_feature(pos, q)
+        eye = choose_eye(self._fresh_det(), self._fresh_down(), pos, feature)
+        self._eye = eye or "front"
+        return eye, feature
 
     def _enter_search(self, tm: float, reason: str, pos=None):
         """Drop to expanding spiral; centre on last lock / seed / current pose."""
@@ -339,6 +428,7 @@ class UdroneApproachController(UdroneHelixController):
         self._search_t0 = tm
         self._last_search_tm = tm
         self._orbit_acc = 0.0
+        self._heading_prev = None
         self._last_orbit_n = 0
         self._orbit_tm = tm
         # Mild bump on each re-entry so lost-track expands coverage.
@@ -376,6 +466,20 @@ class UdroneApproachController(UdroneHelixController):
     # ---- control hooks --------------------------------------------------
     def _events(self, tm: float):
         if self._stage == "search":
+            pos = self._prev[1] if self._prev else None
+            q = self._prev[2] if self._prev else None
+            eye, feature = self._select_eye(pos, q)
+            if eye == "down":
+                self._stage = "approach"
+                self._search_t0 = None
+                if feature is not None:
+                    self._lock_e, self._lock_n = feature[0], feature[1]
+                print(
+                    f"APPROACH_ACQUIRED down u={self._down_u:.1f} v={self._down_v:.1f} "
+                    f"s={self._down_s:.1f}px",
+                    flush=True,
+                )
+                return
             if self._search_t0 is None:
                 self._search_t0 = tm
                 self._last_search_tm = tm
@@ -407,6 +511,15 @@ class UdroneApproachController(UdroneHelixController):
             return
 
         if not self._fresh_det():
+            pos = self._prev[1] if self._prev else None
+            q = self._prev[2] if self._prev else None
+            eye, feature = self._select_eye(pos, q)
+            if eye == "down":
+                if feature is not None:
+                    self._lock_e, self._lock_n = feature[0], feature[1]
+                if self._stage == "search":
+                    self._stage = "approach"
+                return
             if self._stage == "settle" and self._settle_t0 is not None:
                 held = tm - self._settle_t0
                 if held >= max(1.0, 0.5 * self.settle_s):
@@ -507,13 +620,17 @@ class UdroneApproachController(UdroneHelixController):
 
         eyaw = wrap_pi(desire - yaw)
         yaw_u = clamp(0.9 * eyaw + self._search_yaw_sign * 0.3 * SEARCH_YAW_RATE, RATE_MAX)
+        on_ring = not (horiz > self._search_r + 0.6 or horiz < max(0.4, self._search_r - 0.6))
 
-        # Integrate orbit progress from commanded yaw rate magnitude.
-        dt = 0.05
-        if self._orbit_tm is not None and tm > self._orbit_tm:
-            dt = tm - self._orbit_tm
-        self._orbit_tm = tm
-        self._orbit_acc += abs(yaw_u) * dt * 2.5  # scale normalized cmd → rad-ish
+        # One orbit is a full turn of the measured heading, and only while the
+        # hull is actually on the ring. The command is not the heading.
+        if self._heading_prev is None:
+            self._heading_prev = yaw
+        else:
+            turned = wrap_pi(yaw - self._heading_prev)
+            self._heading_prev = yaw
+            if on_ring:
+                self._orbit_acc += abs(turned)
         orbit_n = int(self._orbit_acc / (2.0 * math.pi))
         if orbit_n > self._last_orbit_n:
             self._last_orbit_n = orbit_n
@@ -530,6 +647,67 @@ class UdroneApproachController(UdroneHelixController):
 
         return pitch_u, yaw_u, thrust
 
+    def _nadir_rates(self, tm, pos, q, feature):
+        """Yaw and surge so the downward camera's tag slides to the centre."""
+        x_n = (self._down_u - self.dcx) / max(self.dfx, 1e-3)
+        y_n = (self._down_v - self.dcy) / max(self.dfy, 1e-3)
+        z_opt = self.dfx * self.tag_size_m / max(self._down_s, 1.0)
+        bx, by, _bz = nadir_body(x_n, y_n, z_opt)
+        fwd, left, _up = body_axes(q)
+        wx = bx * fwd[0] + by * left[0]
+        wy = bx * fwd[1] + by * left[1]
+        horiz = math.hypot(wx, wy)
+        if feature is not None:
+            self._lock_e, self._lock_n = float(feature[0]), float(feature[1])
+            self.tag_e, self.tag_n = self._lock_e, self._lock_n
+        self.tag_source = "down_ibvs"
+        yaw = rpy_from_q(q)[2]
+        if horiz < 0.20 and z_opt <= self.z_des * 1.4:
+            yaw_u = 0.0
+            thrust = 0.0
+            if self._settle_t0 is None:
+                self._settle_t0 = tm
+                self._stage = "settle"
+                print(
+                    f"APPROACH_SETTLE down horiz={horiz:.2f} z={z_opt:.2f}",
+                    flush=True,
+                )
+            elif tm - self._settle_t0 >= self.settle_s:
+                self.arrived = True
+                self._stage = "done"
+                print(
+                    f"APPROACH_ARRIVED down horiz={horiz:.2f} z={z_opt:.2f}",
+                    flush=True,
+                )
+        else:
+            self._settle_t0 = None
+            if self._stage == "settle":
+                self._stage = "approach"
+            if horiz < 0.20:
+                yaw_u = 0.0
+                thrust = 0.0
+            else:
+                desire = math.atan2(wy, wx)
+                yaw_u = clamp(0.9 * wrap_pi(desire - yaw), RATE_MAX)
+                thrust = clamp(0.05 + 0.10 * min(horiz, 2.0), THRUST_MAX)
+        if tm >= self.next_print:
+            self.next_print = tm + 1.0
+            print(
+                f"t={tm:5.1f} NADIR horiz={horiz:.2f} z≈{z_opt:.2f} "
+                f"yaw_u={yaw_u:+.2f} thrust={thrust:+.2f} stage={self._stage}",
+                flush=True,
+            )
+        return 0.0, yaw_u, thrust
+
+    def _hud_layers(self):
+        """The camera that is servoing the bed tag, and where the lock sits."""
+        lines = [f"tag {self.tag_id}  eye {self._eye}  source {self.tag_source or '-'}  "
+                 f"search R {self._search_r:.1f} m"]
+        if self.tag_e is not None and self.tag_n is not None:
+            lines.append(f"lock ENU ({self.tag_e:.1f}, {self.tag_n:.1f})")
+        return {"camera": self._eye, "stage": self._stage, "lines": lines,
+                "markers": [], "paths": []}
+
     def _control(self, tm, auv, boat):
         """Search spiral or IBVS → body rates (pitch/yaw) + surge. Roll always 0."""
         pos, q = auv
@@ -539,14 +717,19 @@ class UdroneApproachController(UdroneHelixController):
         elif sim_t > self._prev[0] + 1e-3:
             self._prev = (sim_t, pos, q)
 
-        if self._stage == "search" and self._search_t0 is None:
+        if self._stage == "search" and self._search_t0 is None and not self._fresh_down():
             self._enter_search(tm, "start", pos=pos)
 
         thrust = 0.0
         pitch_u = 0.0
         yaw_u = 0.0
 
-        if self._stage == "search" and not self._fresh_det():
+        eye, feature = self._select_eye(pos, q)
+        if eye == "down":
+            pitch_u, yaw_u, thrust = self._nadir_rates(tm, pos, q, feature)
+            if self._stage == "search":
+                self._stage = "approach"
+        elif self._stage == "search" and not self._fresh_det():
             pitch_u, yaw_u, thrust = self._search_rates(tm, pos, q)
             if tm >= self.next_print:
                 self.next_print = tm + 2.0

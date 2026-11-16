@@ -8,11 +8,13 @@ toward the bearing. A closed ring gets a smooth join onto the centerline,
 ending at the rollout short of the opening. That lead-in is replaced only
 when the estimated centre moves by more than a metre. When the fix locks,
 a second trajectory is planned from the pose at that moment and flown
-straight through the ring. It is not revised. A pass requires the ring
+straight through the ring. If the ring leaves the front camera before the
+hull is inside the opening, that line is cancelled and a short relock leg
+points the front camera at the last fix. A pass requires the ring
 around the optical axis and the hull inside the placed hoop at ENU
-(6, 0, -1). A debug image on ``/xudrone/hoop_debug/image`` draws the ring,
-any AprilTag, and the command arrow. The same image draws the planned path, its end,
-and the fix. Coral command type ``hoop``.
+(6, 0, -4.626). The shared HUD (``/xudrone/hud/image``) adds the ring box, the
+planned path, its end, and the fix to the front camera. Coral command type
+``hoop``.
 """
 from __future__ import annotations
 
@@ -28,14 +30,12 @@ import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
 
-try:
-    from apriltag_msgs.msg import AprilTagDetectionArray
-except ImportError:
-    AprilTagDetectionArray = None
-
 from hoop_geom import (
     HOOP_AXIS,
     HOOP_CENTER,
+    HOOP_FLOOR,
+    DEPTH_HI,
+    DEPTH_LO,
     INNER_PASS_M,
     RING_OUTER_M,
     SEARCH_HITS,
@@ -51,10 +51,12 @@ from hoop_geom import (
     look_leg,
     look_step,
     orange_ring,
+    pass_depth,
     ring_center,
     sideways_baseline,
 )
 from patterns import path_length_3d, polyline_pos_vel, world_offset_to_path
+from servo_geom import abort_pass, relock_leg
 from udrone_sinusoidal_controller import (
     UdroneHelixController,
     body_axes,
@@ -62,8 +64,8 @@ from udrone_sinusoidal_controller import (
     spin_until_done,
 )
 
-SPEED = 0.22
-LEAD_M = 2.4
+SPEED = 0.32          # trial 6 of the hoop search rollout
+LEAD_M = 1.62
 EXIT_M = 2.0
 SEARCH_BUDGET_S = 200.0
 THROUGH_BUDGET_S = 80.0
@@ -72,8 +74,6 @@ CENTER_PX = 0.35            # levelled lateral error before the sweep is planned
 CENTER_PY = 0.45            # levelled vertical error
 COMMIT_ASPECT = 0.55        # minor/major; near enough to the ring axis to pass
 LOST_S = 1.5
-SLEW_MPS = 0.25             # how fast the approach point may move
-FILT_S = 0.30               # image-feature time constant
 NOSE_DOWN_CAP = 0.85        # rad; past this, do not command a deeper setpoint
 
 
@@ -95,6 +95,8 @@ class UdroneHoopController(UdroneHelixController):
         kwargs.setdefault("x_rate", SPEED)
         kwargs.setdefault("z0", -1.0)
         super().__init__(**kwargs)
+        # The search dives about 4.5 m to the ring, so allow a steep nose.
+        self.pitch_limit = math.radians(70.0)
         self.stage = "search"
         self.fx = 381.46
         self.fy = 381.46
@@ -137,32 +139,25 @@ class UdroneHoopController(UdroneHelixController):
         self._approach_wps = []
         self._approach_t0 = None
         self._approach_stand = None
-        self._slew_tm = None
-        self._filt = None
         self._track_log_t = 0.0
         self._last_hit_t = -LOST_S
+        self._through_seen = None
+        self._relock = False
         self._tracking = False
         self._deep_t = None
         self._dumped = False
         self._last_center = None
         self._sweep_world = []
-        self._tags = []
-        self._frame = None
+        self._hud_hit = None
+        self.hud_preview = False
         self._use_cv2 = _cv2_ok()
         info_topic = os.environ.get("UDRONE_HOOP_INFO_TOPIC", "/xudrone/camera_front/camera_info")
         image_topic = os.environ.get("UDRONE_HOOP_IMAGE_TOPIC", "/xudrone/camera_front/image")
-        debug_topic = os.environ.get("UDRONE_HOOP_DEBUG_TOPIC", "/xudrone/hoop_debug/image")
         self.create_subscription(CameraInfo, info_topic, self._on_info, qos_profile_sensor_data)
         self.create_subscription(Image, image_topic, self._on_image, qos_profile_sensor_data)
-        self._debug_pub = self.create_publisher(Image, debug_topic, 2)
-        if AprilTagDetectionArray is not None:
-            det_topic = os.environ.get("UDRONE_HOOP_DET_TOPIC", "/xudrone/detections")
-            self.create_subscription(
-                AprilTagDetectionArray, det_topic, self._on_tag, qos_profile_sensor_data,
-            )
         self.get_logger().info(
             f"hoop: opencv ring outer={RING_OUTER_M:g} m "
-            f"cv2={'yes' if self._use_cv2 else 'MISSING'} debug={debug_topic}"
+            f"cv2={'yes' if self._use_cv2 else 'MISSING'}"
         )
 
     def _on_info(self, m: CameraInfo):
@@ -173,16 +168,6 @@ class UdroneHoopController(UdroneHelixController):
 
     def _on_image(self, m: Image):
         self._img = (m.encoding or "", int(m.width), int(m.height), bytes(m.data), time.time())
-
-    def _on_tag(self, m):
-        tags = []
-        now = time.time()
-        for d in m.detections:
-            pts = [(float(c.x), float(c.y)) for c in d.corners]
-            if len(pts) < 4:
-                continue
-            tags.append((int(d.id), pts, (float(d.centre.x), float(d.centre.y)), now))
-        self._tags = tags
 
     def _bgr(self):
         if self._img is None or not self._use_cv2:
@@ -206,8 +191,6 @@ class UdroneHoopController(UdroneHelixController):
         elif key == "bgra8" and arr.size >= w * h * 4:
             bgra = arr[: w * h * 4].reshape(h, w, 4)
             frame = cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR)
-        if frame is not None:
-            self._frame = frame
         return frame
 
     def _events(self, tm: float):
@@ -216,23 +199,6 @@ class UdroneHoopController(UdroneHelixController):
             return
         if self.stage == "search" and self.latch.state == "attached":
             self._fail("hoop rejected: xudrone is latched; detach first")
-
-    def _smooth(self, hit, tm):
-        """Low-pass the limb measurement so one frame cannot yank the setpoint."""
-        now = float(tm)
-        prev = self._filt
-        if prev is None or now - prev["t"] > 1.0:
-            hit["t"] = now
-            self._filt = dict(hit)
-            return hit
-        dt = max(1e-3, now - prev["t"])
-        a = 1.0 - math.exp(-dt / FILT_S)
-        for key in ("u", "v", "major", "minor"):
-            hit[key] = prev[key] + a * (hit[key] - prev[key])
-        hit["aspect"] = hit["minor"] / max(hit["major"], 1.0)
-        hit["t"] = now
-        self._filt = dict(hit)
-        return hit
 
     def _sight(self, tm, pos, q):
         """Latest orange-ring centre, or None. One fit per camera frame."""
@@ -254,7 +220,6 @@ class UdroneHoopController(UdroneHelixController):
                 orange = int(((r > 150) & (r > g + 45) & (r > b + 100) & (g > b + 25)).sum())
                 print(f"HOOP_RING none orange={orange}", flush=True)
             return None
-        hit = self._smooth(dict(hit), tm)
         fwd, left, up = body_axes(q)
         try:
             center, z_opt = ring_center(
@@ -312,7 +277,7 @@ class UdroneHoopController(UdroneHelixController):
         if not (COMMIT_RANGE[0] <= hit["z_opt"] <= COMMIT_RANGE[1]):
             return
         center = hit["center"]
-        if center[2] > -0.35 or center[2] < -1.80:
+        if center[2] > -0.35 or center[2] < HOOP_FLOOR:
             return
         stamp = self._img[4] if self._img is not None else None
         if stamp == self._fix_stamp:
@@ -338,6 +303,8 @@ class UdroneHoopController(UdroneHelixController):
         self._sweep_world = points
         self._wps = [self._path_of(p) for p in points]
         self._through_t0 = tm
+        self._through_seen = tm
+        self._relock = False
         self.stage = "through"
         self._servo = None
         self._fix_samples.clear()
@@ -351,7 +318,7 @@ class UdroneHoopController(UdroneHelixController):
         )
 
     def _aim(self, pos, hit):
-        """World point the force loop should chase, before the slew limit.
+        """World point the force loop should chase.
 
         A closed ring uses the estimated centre and stops LEAD_M short of it.
         An arc only gives a bearing, so the aim is a short step along the
@@ -373,7 +340,7 @@ class UdroneHoopController(UdroneHelixController):
             else:
                 ux, uy = de / dist, dn / dist
             back = min(LEAD_M, max(0.0, dist - 0.6))
-            z = pos[2] if hold_depth else min(-0.65, max(-1.35, c[2]))
+            z = pos[2] if hold_depth else pass_depth(c[2])
             return (c[0] - ux * back, c[1] - uy * back, z)
         step = 1.5
         z = pos[2]
@@ -382,22 +349,6 @@ class UdroneHoopController(UdroneHelixController):
             pos[1] + step * ax[1] - hit["x_n"] * step * left_h[1],
             z,
         )
-
-    def _slew(self, tm, target):
-        if self._approach is None:
-            self._approach = target
-            self._slew_tm = tm
-            return
-        dt = 0.05 if self._slew_tm is None else max(0.0, min(0.2, tm - self._slew_tm))
-        self._slew_tm = tm
-        step = SLEW_MPS * dt
-        delta = tuple(target[i] - self._approach[i] for i in range(3))
-        dist = math.sqrt(sum(v * v for v in delta))
-        if dist <= step or dist < 1e-3:
-            self._approach = target
-            return
-        scale = step / dist
-        self._approach = tuple(self._approach[i] + scale * delta[i] for i in range(3))
 
     def _plan_once(self, tm, pos, hit, closed_line):
         """Plan one lead-in and keep tracking it.
@@ -411,7 +362,7 @@ class UdroneHoopController(UdroneHelixController):
             return
         center = hit["center"]
         kind = "lead"
-        if closed_line and -1.80 <= center[2] <= -0.35:
+        if closed_line and HOOP_FLOOR <= center[2] <= -0.35:
             moved = (
                 self._planned_center is None
                 or math.dist(self._planned_center, center) > 1.2
@@ -470,8 +421,6 @@ class UdroneHoopController(UdroneHelixController):
         self._approach_t0 = None
         self._approach_stand = None
         self._tracking = False
-        self._slew_tm = None
-        self._filt = None
         self._fix_samples.clear()
         self._fix_origin = None
         self._fix_stamp = None
@@ -595,9 +544,56 @@ class UdroneHoopController(UdroneHelixController):
             flush=True,
         )
 
+    def _abort_through(self, tm, pos):
+        """Drop the blind line and point the front camera at the last ring."""
+        center = self._last_center or self._center
+        self.stage = "search"
+        self._wps = []
+        self._through_t0 = None
+        self._through_seen = None
+        self._sweep_world = []
+        self._tracking = False
+        self._approach_wps = []
+        self._approach = None
+        self._approach_t0 = None
+        self._crossed = False
+        self._fix_samples.clear()
+        where = ""
+        if center is not None:
+            where = f" center=({center[0]:.2f},{center[1]:.2f},{center[2]:.2f})"
+        print(f"HOOP_RELOCK ring left the front camera{where}", flush=True)
+        if center is None or self.anchor is None:
+            self._relock = False
+            return
+        self._last_center = center
+        leg = relock_leg(pos, center, "front")
+        z = min(DEPTH_HI, max(DEPTH_LO, leg[2]))
+        target = (leg[0], leg[1], z)
+        self._search_wps = [
+            self._path_of((float(pos[0]), float(pos[1]), float(pos[2]))),
+            self._path_of(target),
+        ]
+        self._search_end = target
+        self._leg_t0 = tm
+        length = path_length_3d(self._search_wps)
+        self._leg_time = length / max(SPEED, 0.05)
+        self._leg_limit = max(6.0, self._leg_time + 8.0)
+        self._goal_cell = ("relock", round(center[0], 1), round(center[1], 1))
+        self._goal_xy = (float(center[0]), float(center[1]))
+        self._relock = True
+
     def _steer(self, tm, pos, yaw):
         if self.anchor is None:
             return
+        if self._relock:
+            end = self._search_end
+            held = self._leg_t0 is not None and tm - self._leg_t0 < self._leg_limit
+            if end is not None and math.dist(pos, end) > 0.6 and held:
+                return
+            self._relock = False
+            self._search_wps = []
+            self._leg_t0 = None
+            self._goal_cell = None
         if self._map is None:
             x0, y0, _yaw0 = self.anchor
             self._map = CoverageMap(x0, y0)
@@ -650,57 +646,45 @@ class UdroneHoopController(UdroneHelixController):
                 flush=True,
             )
 
-    def _project(self, world_pt, pos, q):
-        """Image pixel of a world point in front of the camera, or None."""
-        fwd, left, up = body_axes(q)
-        dx = float(world_pt[0]) - float(pos[0])
-        dy = float(world_pt[1]) - float(pos[1])
-        dz = float(world_pt[2]) - float(pos[2])
-        ahead = dx * fwd[0] + dy * fwd[1] + dz * fwd[2]
-        if ahead < 0.25:
-            return None
-        left_m = dx * left[0] + dy * left[1] + dz * left[2]
-        up_m = dx * up[0] + dy * up[1] + dz * up[2]
-        # Image +x is hull -Y, image +y is hull -Z.
-        return (
-            self.cx + self.fx * (-left_m / ahead),
-            self.cy + self.fy * (-up_m / ahead),
-        )
-
-    def _publish_debug(self, pos, q, hit, cmd):
-        """Camera image with the ring, the planned path, and the command arrow."""
-        self._bgr()
-        frame = self._frame
-        if frame is None or not self._use_cv2 or self._img is None:
-            return
-        stamp = self._img[4]
-        if stamp == getattr(self, "_debug_stamp", None):
-            return
-        self._debug_stamp = stamp
-        import array
-        import cv2
-        import numpy as np
-
-        img = frame.copy()
-        height, width = img.shape[:2]
-
-        def clip(pt):
-            return (
-                int(max(0, min(width - 1, pt[0]))),
-                int(max(0, min(height - 1, pt[1]))),
-            )
-
-        now = time.time()
-        for tid, pts, centre, seen in self._tags:
-            if now - seen > 0.4 or len(pts) < 4:
-                continue
-            poly = np.array([clip(p) for p in pts], np.int32)
-            cv2.polylines(img, [poly], True, (255, 200, 0), 2)
-            cv2.putText(
-                img, f"tag {tid}", clip(centre),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA,
-            )
+    def _hud_layers(self):
+        """Ring box, planned path, end, fix, and the plan caption for the HUD."""
+        out = UdroneHelixController._hud_layers(self)
+        out["camera"] = "front"
+        out["stage"] = self.stage
+        pos = self._prev[1] if self._prev is not None else None
+        hit = self._hud_hit
+        world = list(self._sweep_world) if self._sweep_world else []
+        if not world and self._search_end is not None:
+            world = [self._search_end]
+        center = self._center if self._center is not None else self._planned_center
+        slides = self._slides
+        slide_m = (max(slides) - min(slides)) if len(slides) >= 2 else 0.0
+        remain = math.dist(pos, world[-1]) if (world and pos is not None) else 0.0
+        out["lines"] += list(debug_caption(
+            self.stage, self._plan_kind, len(world), remain, center, slide_m,
+            self._real_miss, self._surrounded, self._real_crossed,
+        ))
         if hit is not None:
+            out["lines"].append(
+                f"ring {hit['z_opt']:.1f}m asp {hit['aspect']:.2f} "
+                f"lvl {hit['x_l']:+.2f},{hit['y_l']:+.2f}"
+            )
+        if center is not None:
+            out["markers"].append({"pos": center, "label": "fix", "color": (255, 255, 255), "shape": "diamond"})
+        if world:
+            near_i = 0
+            if pos is not None:
+                near_i = min(range(len(world)), key=lambda i: math.dist(pos, world[i]))
+            if near_i > 0:
+                out["paths"].append({"pts": world[: near_i + 1], "color": (0, 90, 140), "width": 1})
+            out["paths"].append({"pts": world[near_i:], "color": (0, 200, 255), "width": 2})
+            out["markers"].append({"pos": world[-1], "label": "end", "color": (0, 200, 255), "shape": "circle"})
+
+        def draw(img, _proj, clip):
+            import cv2
+
+            if hit is None:
+                return
             bw = float(hit.get("w", hit["major"]))
             bh = float(hit.get("h", hit["minor"]))
             x0 = int(hit["u"] - bw / 2.0)
@@ -708,109 +692,25 @@ class UdroneHoopController(UdroneHelixController):
             color = (0, 220, 0) if hit.get("closed") else (0, 180, 255)
             cv2.rectangle(img, (x0, y0), (x0 + int(bw), y0 + int(bh)), color, 2)
             cv2.drawMarker(img, clip((hit["u"], hit["v"])), color, cv2.MARKER_CROSS, 18, 2)
-            cv2.putText(
-                img,
-                f"ring {hit['z_opt']:.1f}m asp {hit['aspect']:.2f} "
-                f"lvl {hit['x_l']:+.2f},{hit['y_l']:+.2f}",
-                (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA,
-            )
-        world = list(self._sweep_world) if self._sweep_world else []
-        if not world and self._search_end is not None:
-            world = [self._search_end]
-        projs = [self._project(p, pos, q) for p in world]
-        near_i = 0
-        if world:
-            near_i = min(range(len(world)), key=lambda i: math.dist(pos, world[i]))
 
-        def draw_chain(indices, color, thickness):
-            prev = None
-            for i in indices:
-                pix = projs[i]
-                if pix is None:
-                    prev = None
-                    continue
-                if prev is not None:
-                    cv2.line(img, clip(prev), clip(pix), color, thickness, cv2.LINE_AA)
-                prev = pix
-
-        if world:
-            draw_chain(range(near_i + 1), (0, 90, 140), 1)
-            draw_chain(range(near_i, len(world)), (0, 200, 255), 2)
-            end_pix = projs[-1]
-            if end_pix is not None:
-                cv2.circle(img, clip(end_pix), 5, (0, 200, 255), 2, cv2.LINE_AA)
-                cv2.putText(
-                    img, "end", clip((end_pix[0] + 8, end_pix[1] - 8)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1, cv2.LINE_AA,
-                )
-            here = projs[near_i]
-            if here is not None:
-                cv2.circle(img, clip(here), 3, (255, 255, 255), -1, cv2.LINE_AA)
-        center = self._center if self._center is not None else self._planned_center
-        if center is not None:
-            fix_pix = self._project(center, pos, q)
-            if fix_pix is not None:
-                cv2.drawMarker(
-                    img, clip(fix_pix), (255, 255, 255), cv2.MARKER_DIAMOND, 14, 1,
-                )
-                cv2.putText(
-                    img, "fix", clip((fix_pix[0] + 8, fix_pix[1] + 14)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA,
-                )
-        slides = self._slides
-        slide_m = (max(slides) - min(slides)) if len(slides) >= 2 else 0.0
-        remain = math.dist(pos, world[-1]) if world else 0.0
-        lines = debug_caption(
-            self.stage, self._plan_kind, len(world), remain, center, slide_m,
-            self._real_miss, self._surrounded, self._real_crossed,
-        )
-        text_y = 44 if hit is not None else 22
-        for line in lines:
-            cv2.putText(
-                img, line, (8, text_y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 200, 255), 1, cv2.LINE_AA,
-            )
-            text_y += 18
-        thrust, _roll_u, pitch_u, yaw_u = cmd
-        # +yaw command is nose left (image left). +pitch command is nose down.
-        tip = clip((self.cx - float(yaw_u) * 140.0, self.cy + float(pitch_u) * 140.0))
-        cv2.arrowedLine(img, clip((self.cx, self.cy)), tip, (0, 255, 255), 2, tipLength=0.28)
-        cv2.putText(
-            img,
-            f"{self.stage} thrust {thrust:+.2f} pitch {pitch_u:+.2f} yaw {yaw_u:+.2f}",
-            (8, height - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA,
-        )
-        msg = Image()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "xudrone/front_camera"
-        msg.height = height
-        msg.width = width
-        msg.encoding = "bgr8"
-        msg.is_bigendian = 0
-        msg.step = width * 3
-        msg.data = array.array("B", img.tobytes())
-        self._debug_pub.publish(msg)
-        if time.time() >= getattr(self, "_debug_jpg_t", 0.0):
-            self._debug_jpg_t = time.time() + 1.0
-            try:
-                cv2.imwrite("/tmp/hoop_debug.jpg", img)
-            except Exception:
-                pass
+        out["draw"] = draw
+        return out
 
     def _act(self, tm, auv, boat, hit, cmd=None):
         if cmd is None:
             cmd = UdroneHelixController._control(self, tm, auv, boat)
-        try:
-            self._publish_debug(auv[0], auv[1], hit, cmd)
-        except Exception as exc:
-            if not getattr(self, "_debug_err", False):
-                self._debug_err = True
-                print(f"HOOP_DEBUG {exc}", flush=True)
+        self._hud_hit = hit
         return cmd
 
     def _control(self, tm, auv, boat):
         pos, q = auv
-        if pos[2] < -1.80:
+        self.yaw_hold = None
+        if self._relock and self._search_end is not None:
+            dx = self._search_end[0] - pos[0]
+            dy = self._search_end[1] - pos[1]
+            if math.hypot(dx, dy) > 0.60:
+                self.yaw_hold = math.atan2(dy, dx)
+        if pos[2] < HOOP_FLOOR:
             if self._deep_t is None:
                 self._deep_t = tm
             elif tm - self._deep_t > 4.0:
@@ -822,7 +722,13 @@ class UdroneHoopController(UdroneHelixController):
         if self.stage == "through":
             hit = self._sight(tm, pos, q)
             self._note_surround(hit)
-            if self._center is not None and in_opening(pos, self._center, self._axis, INNER_PASS_M):
+            inside = (
+                self._center is not None
+                and in_opening(pos, self._center, self._axis, INNER_PASS_M)
+            )
+            if hit is not None:
+                self._through_seen = tm
+            if inside:
                 if not self._crossed:
                     self._crossed = True
                     print(
@@ -830,6 +736,11 @@ class UdroneHoopController(UdroneHelixController):
                         f"real_miss={self._real_miss:.2f}",
                         flush=True,
                     )
+                return self._act(tm, auv, boat, hit)
+            seen = self._through_seen if self._through_seen is not None else (self._through_t0 or tm)
+            if abort_pass(tm - seen, inside=False):
+                self._abort_through(tm, pos)
+                return self._act(tm, auv, boat, hit)
             return self._act(tm, auv, boat, hit)
 
         hit = self._sight(tm, pos, q)
@@ -844,6 +755,7 @@ class UdroneHoopController(UdroneHelixController):
         if usable:
             self._last_hit_t = tm
             self._last_center = hit["center"]
+            self._relock = False
             self._commit(tm, pos, hit)
             if self.stage == "through":
                 return self._act(tm, auv, boat, hit)

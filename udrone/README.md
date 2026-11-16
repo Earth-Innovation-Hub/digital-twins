@@ -54,7 +54,8 @@ east-west. It has no AprilTags; `hoop` finds it with the front camera.
 | `xudrone_camera_bridge.sh` | `/usr/local/bin/…` | front camera → `/xudrone/camera_front/*` |
 | `*_down_camera_bridge.sh` | `/usr/local/bin/…` | nadir cameras → `/otter_k|xudrone/camera_down/*` |
 | `xudrone_up_camera_bridge.sh` | `/usr/local/bin/…` | upward camera → `/xudrone/camera_up/*` (deck tag 10) |
-| `xudrone_range_bridge.sh` | `/usr/local/bin/…` | EchoRanger + surface beam → `/xudrone/range/{bottom,surface}` |
+| `xudrone_range_bridge.sh` | `/usr/local/bin/…` | EchoRanger + surface beam → `/xudrone/range/{bottom,surface}`; forward sonar → `/xudrone/sonar/points_raw` |
+| `xudrone_mapping.sh` | `/usr/local/bin/…` | OctoMap (3D) + `xudrone_mapper` (TF, odometry, 2D map); see [Mapping](#mapping) |
 | `start_boat.sh` | `/root/start_boat.sh` | CoRAL pair (default `simctl start`) |
 | `start_udrone.sh` | `/root/start_udrone.sh` | `--secondary` (from boat) or solo |
 | `stop_sim.sh` | `/root/stop_sim.sh` | used by `simctl stop` |
@@ -161,9 +162,11 @@ Commands:
 {"type":"swim","north_m"?, "east_m"?, "along_heading_m"?, "relative_to":"current"|"world"|"heading", "depth_m"?, "speed_mps"?, "arrive_m"?, "id"?}
 {"type":"hoop","id"?}
 {"type":"track","duration_s"?, "standoff_m"?, "id"?}
+{"type":"rendezvous","id"?}
+{"type":"shape","shape":"infinity"|"orbit"|"loop", "size_m"?, "loops"?, "speed_mps"?, "id"?}
 {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "until"?: "tag_detected","id"?}
 {"type":"approach_tag","tag_id"?, "standoff_m"?, "tag_size_m"?, "settle_s"?, "timeout_s"?, "acquire_s"?, "search_budget_s"?, "search_r0_m"?, "search_r_max_m"?, "center_east_m"?, "center_north_m"?, "id"?}
-{"type":"hold"|"abort","id"?}
+{"type":"hold"|"abort"|"reset","id"?}
 ```
 
 | behaviour | vehicle | notes |
@@ -171,9 +174,11 @@ Commands:
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
 | `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
-| `hoop` | xudrone | front-camera search for the orange ring, then one smooth join onto the centerline through the opening. A pass needs the ring around the optical axis and the hull inside the opening at ENU (6, 0, −1). Rejected while latched. Debug image: `/xudrone/hoop_debug/image` |
+| `hoop` | xudrone | front-camera search for the orange ring, then one smooth join onto the centerline through the opening. A pass needs the ring around the optical axis and the hull inside the opening at ENU (6, 0, −1). Rejected while latched. HUD: `/xudrone/hud/image` (every task) |
 | `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
-| `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected` |
+| `rendezvous` | xudrone | Nest-axis dock under otter_k. Spiral is centred on the weld nest (Heron origin, between the pontoons). Tag 10 finds the deck; the servo pulls onto boat −Z (normal to the deck) so the hull stays between the pontoons with plates parallel. Acceptance cone: 30° half-angle, 2.5 m, heading ≤25°, plate tilt ≤35°. Climb along the nest axis and ATTACH inside 0.45 m / 22° (weld gate 0.6 m / 30°). Phrase `xudrone, rendezvous and dock with otter_k` |
+| `shape` | xudrone | Infinity / orbit / vertical loop on the force loop (detach first). Phrase e.g. `xudrone, fly an infinity pattern of 3m loops` |
+| `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected`; `--plan map` uses the costmap |
 | `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
 | `dock` | latch | boat-nest ATTACH/DETACH (gates 0.6 m / 30°) — not bed-tag geometry |
 
@@ -204,14 +209,20 @@ docker exec digital-twin-aquatic coral_cmd.py helix --duration 20 --radius 0.4
 docker exec digital-twin-aquatic coral_cmd.py swim --north 10
 docker exec digital-twin-aquatic coral_cmd.py hoop
 docker exec digital-twin-aquatic coral_cmd.py track --duration 90 --standoff 1
+docker exec digital-twin-aquatic coral_cmd.py rendezvous
 docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --layers 3
 docker exec digital-twin-aquatic coral_cmd.py approach_tag --standoff 1.5 --east 5 --north 4 --world
 docker exec digital-twin-aquatic coral_cmd.py dock attach
 ```
 
-Example LLM-facing plan: *undock → short coverage until tag → approach the tag*
-→ `dock detach`, `coverage(until=tag_detected)`, `approach_tag`. One command at a
-time (`busy` rejects overlaps); `abort` cancels.
+Example LLM-facing plans (tesseract `coral_bridge`):
+- *undock → short coverage until tag → approach the tag* → `dock detach`,
+  `coverage(until=tag_detected)`, `approach_tag`
+- *undock, search for and approach tag, then rendezvous with otter_k* →
+  `dock detach`, `approach_tag`, `rendezvous` (direct phrase; no LLM)
+
+One command at a time (`busy` rejects overlaps); `abort` cancels. Multi-step
+instruction plans advance on `*_done` (e.g. `approach_done` → nest rendezvous).
 
 ## Demos and tests
 
@@ -286,6 +297,55 @@ inside the boat). Pose feedback is Gazebo `/world/kiwanis_lake/dynamic_pose/info
 (~56 Hz); offboard setpoints use **timestamp 0** so ROS wall time need not match
 PX4 sim time. `UUV_SKIP_CTRL 1` feeds `vehicle_rates_setpoint` straight through
 to the mixer.
+
+## Mapping
+
+The xudrone builds a local 3D map and a global 2D map whenever the simulator runs.
+`start_udrone.sh` launches `xudrone_mapping.sh` once the sonar topic appears; logs
+go to `/root/log/xudrone_mapping.log` and `/root/log/xudrone_octomap.log`.
+
+- **Sensor.** A forward multibeam sonar, emulated with a Gazebo `gpu_lidar` on
+  `sonar_link`: 96 × 12 beams over 120° × 20°, 0.3–30 m, 5 Hz, tilted 10° down.
+  The downward EchoRanger adds bed hits under the hull.
+- **Pose and TF.** `xudrone_mapper` flies the controller's fused pose (`PoseFuser`
+  in `pose_frame.py`: PX4 odometry, checked against Gazebo) and publishes
+  `map → odom → xudrone/base_link`, the sensor mounts, `otter_k/base_link`, and
+  `/xudrone/odom`. `map` is the Kiwanis ENU world frame.
+- **3D local map.** `octomap_server` (node `/xudrone/octomap/xudrone_octomap`,
+  0.25 m voxels) integrates `/xudrone/sonar/points`. Voxel centres are on
+  `/xudrone/octomap/points`; `/xudrone/map/local_cloud` holds those within 20 m
+  plus altimeter hits.
+- **2D global map.** A 320 m × 320 m grid at 0.5 m (`map_geom.Grid`) keeps bed
+  depth, sonar returns, obstacles (returns 0.6 m above the local bed), camera
+  coverage, and visited cells. It is published as `grid_map_msgs/GridMap`
+  (`/xudrone/map/grid_map`), `nav_msgs/OccupancyGrid` (`/xudrone/map/grid`,
+  `/xudrone/map/bed_depth` in decimetres), the track (`/xudrone/map/track`), and a
+  north-up image (`/xudrone/map/image`, `/tmp/xudrone_map.png`). The grid is saved
+  to `/root/udrone_boat/maps/xudrone_map.npz` every minute and on exit and is
+  reloaded at start; `UDRONE_MAP_FRESH=1` starts empty, and an `Empty` message on
+  `/xudrone/map/reset` clears it.
+- **HUD.** The HUD mini-map paints bed depth (viridis, 0–10 m) and obstacles (red)
+  under its overlays and opens to 20 m once a map exists. The telemetry panel
+  shows bed/obstacle/cover counts, the latest coverage plan, and the pose-graph
+  summary (keyframes, landmarks, σ, graph vs odometry error vs Gazebo). The
+  mini-map also draws the graph path (cyan), tag landmarks (green), and the
+  coverage plan (magenta).
+- **Costmap.** `/xudrone/map/costmap` is a Nav2-style OccupancyGrid at cruise
+  depth: lethal obstacles and bed, inflated hull clearance, unknown water.
+- **Map-aware coverage.** `coral_cmd.py coverage --plan map --target bed|camera`
+  asks `/xudrone/map/plan_coverage` for lanes over unmapped bed (or uncovered
+  camera cells), with A* transits around the costmap. Falls back to the
+  lawnmower if the mapper does not answer.
+- **Pose graph.** GTSAM iSAM2 (`factor_graph.py`, package under `/opt/udrone_py`)
+  runs beside the flown pose: odometry between keyframes, emulated pressure
+  depth and surface GNSS, AprilTag bearing-range landmarks (tag 10 on the
+  Heron deck stays dynamic). Outputs: `/xudrone/graph/{path,pose,markers}`,
+  dump `/root/udrone_boat/maps/xudrone_graph.json`. Status JSON is on
+  `/xudrone/map/status`.
+
+Returns within 1.3 m of the Heron are dropped as the boat. On a steep bank,
+consecutive returns in one cell can rise more than 0.6 m and are marked as
+obstacles.
 
 ## Thrust chain (AUV)
 

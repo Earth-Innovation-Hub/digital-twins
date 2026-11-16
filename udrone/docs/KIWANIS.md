@@ -8,14 +8,17 @@ on Tempe Town Lake is a different world and container.
 - Origin: **33.374047 N, 111.939580 W** (lake centre); elev ≈ 335.28 m; ~12.7 acres
 - Shoreline: OSM way `29210987` (`kiwanis_shore_enu.json`); checked against satellite —
   NW lobe, NE peninsula pinch (~96 m), SE tip, NW cove; long-axis ~457 m ENU
-- Visuals: earcut water mesh (~half transparent, ripple albedo
-  `materials/textures/water_ripples.png`, planar UVs ~12 m/tile); depth-dish bed
-  (shore ~1 m → centre 2.44 m) with tiled silt/sand albedo
+- Visuals: see-through wavy water (classic material so the cameras still
+  see the bed; chop and sun glint are in the mesh normals; an underside sheet
+  for the upward view; a light colour veil below the nadir cameras; a short
+  foam band on the bank); bowl bed
+  (shore 1 m, deepest point 10 m, steepest at the bank) with tiled silt/sand albedo
   (`materials/textures/bed_sand.png`, ~8 m/tile); park mesh with lake hole; west
   pier stub; AprilTag 36h11 id 0 (0.40 m) on all six faces of a 0.50 m
-  cube at ENU (5 E, 4 N, centre z≈−1.83); AprilTag 36h11 id 10 (0.40 m)
-  centered on the underside of the Heron deck, facing down; water uses classic transparency
-  (no PBR) so the down-camera can see the bed/tag; static bottom
+  cube at ENU (5 E, 4 N, centre z=−9.22, sitting on the 9.49 m bed); a 1 m
+  hoop at ENU (6 E, 0 N, z=−4.63), the midpoint of the water column there;
+  AprilTag 36h11 id 10 (0.40 m)
+  centered on the underside of the Heron deck, facing down; static bottom
   debris and surface floats clear of the `0,0` spawn. Regenerate textures/UVs
   with `python3 mk_bed_texture.py` in this model folder.
 - Sensors / perception: otter_k nadir (`/otter_k/camera_down/*`); xudrone front
@@ -24,7 +27,8 @@ on Tempe Town Lake is a different world and container.
   on the hull crown so it sees tag 10 under the deck). `apriltag_ros` + `tag_detector` →
   `/coral/detections` and `/coral/tracks`. The upward camera publishes
   `/xudrone/detections_up` (tag 10). `track` holds a metre under otter_k
-  (`xudrone: track otter_k`; detach first). Boat `survey` / AUV `coverage` can
+  (`xudrone: track otter_k`; detach first). `rendezvous` spirals until that
+  tag is seen, servos onto it, and latches (`xudrone: rendezvous with otter-k`). Boat `survey` / AUV `coverage` can
   stop on `until: tag_detected`; `approach_tag` front-cam IBVS (attitude rates
   + thrust) to the tag. Screenshots: [img/](img/).
 - Collision: tiled bed boxes + bank walls; park AABB slab visuals (ODE triangle-mesh

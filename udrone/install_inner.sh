@@ -87,6 +87,19 @@ install)
   install -m 755 $N/xudrone_down_camera_bridge.sh /usr/local/bin/xudrone_down_camera_bridge.sh
   install -m 755 $N/xudrone_up_camera_bridge.sh /usr/local/bin/xudrone_up_camera_bridge.sh
   install -m 755 $N/xudrone_range_bridge.sh /usr/local/bin/xudrone_range_bridge.sh
+  install -m 755 $N/xudrone_mapping.sh /usr/local/bin/xudrone_mapping.sh
+  # OctoMap for the xudrone 3D map; installed alone so no other ROS package moves.
+  if ! dpkg -s ros-humble-octomap-server >/dev/null 2>&1; then
+    apt-get update -qq && apt-get install -y --no-install-recommends --no-upgrade ros-humble-octomap-server \
+      || echo "octomap_server install failed; mapping runs 2D only"
+  fi
+  # GTSAM Python for the pose graph. Kept under /opt/udrone_py so the system
+  # site-packages stay untouched. 4.3a1 is the first wheel that runs on numpy 2.
+  if [ ! -f /opt/udrone_py/gtsam/__init__.py ]; then
+    mkdir -p /opt/udrone_py
+    pip3 install -q --no-deps --target /opt/udrone_py 'gtsam==4.3a1' \
+      || echo "gtsam install failed; mapper runs without the pose graph"
+  fi
   install -m 755 $N/otter_k_down_camera_bridge.sh /usr/local/bin/otter_k_down_camera_bridge.sh
   install -m 755 $N/dock_command.py /usr/local/bin/dock_command.py
   for f in $N/test/*; do install -m 755 "$f" /root/udrone_boat/src/; done
