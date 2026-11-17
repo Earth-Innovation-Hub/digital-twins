@@ -100,7 +100,9 @@ def main(argv=None):
                    help="coverage shallow depth (world z, m)")
     p.add_argument("--z-bottom", type=float, default=None, dest="z_bottom",
                    help="coverage deep depth (world z, m)")
-    p.add_argument("--speed", type=float, default=None, help="coverage speed_mps")
+    p.add_argument("--speed", type=float, default=None, help="coverage/swim/approach speed_mps")
+    p.add_argument("--power", type=float, default=None, dest="power_pct",
+                   help="maneuver power_pct 5–100 (thrust + pace; smoother when lower)")
     p.add_argument("--heading-deg", type=float, default=None, dest="heading_deg",
                    help="survey/coverage lane heading degrees")
     p.add_argument("--until", default=None,
@@ -299,6 +301,9 @@ def main(argv=None):
         if args.world or args.east or args.north:
             cmd["center_east_m"] = args.east
             cmd["center_north_m"] = args.north
+
+    if args.power_pct is not None:
+        cmd["power_pct"] = float(args.power_pct)
 
     print(f"SEND {json.dumps(cmd)}", flush=True)
     spin_for(node, 0.3)

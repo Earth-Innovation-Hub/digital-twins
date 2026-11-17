@@ -36,9 +36,10 @@ Commands:
       Hold under otter_k: the upward camera watches AprilTag 10 on the
       underside of the deck, and the force loop keeps a metre below it.
       Rejected while the latch is attached. Phrase: xudrone: track otter_k.
-  {"type":"rendezvous","id"?}
+  {"type":"rendezvous","power_pct"?, "id"?}
       Search under otter_k with the upward camera, servo onto AprilTag 10
       on the deck, and latch into the nest. Phrase: xudrone: rendezvous with otter-k.
+      power_pct (5–100) sets thrust authority and reference pace (smoother when lower).
       If the latch is already attached, the behaviour reports landed.
   {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?,
    "z_top"?, "z_bottom"?, "speed_mps"?, "heading_deg"?,
@@ -103,6 +104,7 @@ from udrone_sinusoidal_controller import (  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from patterns import lawnmower  # noqa: E402
 from shape_geom import cruise_speed  # noqa: E402
+import maneuver_power as mp  # noqa: E402
 
 NS_BOAT = "/otter_k/fmu"
 FORCE_ARM = 21196.0
@@ -811,7 +813,7 @@ class CoralBehaviours(Node):
         meta = {
             "duration_s": duration, "radius_m": radius, "omega": omega, "vx": vx, "z0": z0,
         }
-        self._spawn_auv("helix", cmd["id"], runner, env, meta, "/tmp/coral_helix.log")
+        self._spawn_auv("helix", cmd["id"], runner, env, meta, "/tmp/coral_helix.log", cmd=cmd)
 
     def _start_shape(self, cmd):
         if self.latch.state == "attached":
@@ -829,6 +831,8 @@ class CoralBehaviours(Node):
             self._emit({"type": "rejected", "id": cmd["id"],
                         "reason": "shape size, loops, and speed must be numbers"})
             return
+        if speed is None and cmd.get("power_pct") not in (None, ""):
+            speed = max(0.05, cruise_speed() * mp.normalize_power(cmd["power_pct"]))
         if speed is not None:
             speed = max(0.05, speed)
         runner = os.environ.get(
@@ -852,7 +856,7 @@ class CoralBehaviours(Node):
         meta = {"shape": shape, "size_m": size, "loops": loops, "z0": z0}
         if speed is not None:
             meta["speed_mps"] = speed
-        self._spawn_auv("shape", cmd["id"], runner, env, meta, "/tmp/coral_shape.log")
+        self._spawn_auv("shape", cmd["id"], runner, env, meta, "/tmp/coral_shape.log", cmd=cmd)
 
     def _start_swim(self, cmd):
         if self.latch.state == "attached":
@@ -872,7 +876,11 @@ class CoralBehaviours(Node):
             along = cmd.get("along_heading_m")
             along_f = None if along is None else float(along)
             raw_speed = cmd.get("speed_mps", os.environ.get("UDRONE_SWIM_SPEED", ""))
-            speed = cruise_speed() if raw_speed in (None, "") else float(raw_speed)
+            if raw_speed in (None, ""):
+                pace = mp.normalize_power(cmd["power_pct"]) if cmd.get("power_pct") not in (None, "") else 1.0
+                speed = cruise_speed() * pace
+            else:
+                speed = float(raw_speed)
             arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_SWIM_ARRIVE", "0.35")))
         except (TypeError, ValueError):
             self._emit({"type": "rejected", "id": cmd["id"],
@@ -945,7 +953,7 @@ class CoralBehaviours(Node):
             meta["along_heading_m"] = along_f
         if depth is not None and depth != "":
             meta["depth_m"] = float(depth)
-        self._spawn_auv("swim", cmd["id"], runner, env, meta, "/tmp/coral_swim.log")
+        self._spawn_auv("swim", cmd["id"], runner, env, meta, "/tmp/coral_swim.log", cmd=cmd)
 
     def _start_hoop(self, cmd):
         if self.latch.state == "attached":
@@ -971,7 +979,7 @@ class CoralBehaviours(Node):
             "UDRONE_PX4_INSTANCE": str(self.auv_px4),
             "UDRONE_HELIX_BEHAVIOUR": "1",
         }
-        self._spawn_auv("hoop", cmd["id"], runner, env, {}, "/tmp/coral_hoop.log")
+        self._spawn_auv("hoop", cmd["id"], runner, env, {}, "/tmp/coral_hoop.log", cmd=cmd)
 
     def _start_track(self, cmd):
         if self.latch.state == "attached":
@@ -1001,7 +1009,7 @@ class CoralBehaviours(Node):
             env["UDRONE_TRACK_DURATION"] = str(float(cmd["duration_s"]))
         if cmd.get("standoff_m") not in (None, ""):
             env["UDRONE_TRACK_STANDOFF"] = str(float(cmd["standoff_m"]))
-        self._spawn_auv("track", cmd["id"], runner, env, {}, "/tmp/coral_track.log")
+        self._spawn_auv("track", cmd["id"], runner, env, {}, "/tmp/coral_track.log", cmd=cmd)
 
     def _start_rendezvous(self, cmd):
         runner = os.environ.get(
@@ -1023,7 +1031,7 @@ class CoralBehaviours(Node):
             "UDRONE_PX4_INSTANCE": str(self.auv_px4),
             "UDRONE_HELIX_BEHAVIOUR": "1",
         }
-        self._spawn_auv("rendezvous", cmd["id"], runner, env, {}, "/tmp/coral_rendezvous.log")
+        self._spawn_auv("rendezvous", cmd["id"], runner, env, {}, "/tmp/coral_rendezvous.log", cmd=cmd)
 
     def _start_coverage(self, cmd):
         width = float(cmd.get("width_m", os.environ.get("UDRONE_COV_WIDTH", "12")))
@@ -1034,7 +1042,12 @@ class CoralBehaviours(Node):
         layers = int(float(cmd.get("layers", os.environ.get("UDRONE_COV_LAYERS", "3"))))
         z_top = float(cmd.get("z_top", os.environ.get("UDRONE_COV_Z_TOP", "-0.9")))
         z_bottom = float(cmd.get("z_bottom", os.environ.get("UDRONE_COV_Z_BOTTOM", "-1.9")))
-        speed = float(cmd.get("speed_mps", os.environ.get("UDRONE_COV_SPEED", "0.25")))
+        if cmd.get("speed_mps") not in (None, ""):
+            speed = float(cmd["speed_mps"])
+        elif cmd.get("power_pct") not in (None, ""):
+            speed = 0.25 * mp.normalize_power(cmd["power_pct"])
+        else:
+            speed = float(os.environ.get("UDRONE_COV_SPEED", "0.25"))
         heading = float(cmd.get("heading_deg", os.environ.get("UDRONE_COV_HEADING", "0")))
         until = cmd.get("until")
         if until not in (None, "", "tag_detected"):
@@ -1097,7 +1110,7 @@ class CoralBehaviours(Node):
         if ce is not None and cn is not None:
             meta["center_east_m"] = float(ce)
             meta["center_north_m"] = float(cn)
-        self._spawn_auv("coverage", cmd["id"], runner, env, meta, "/tmp/coral_coverage.log")
+        self._spawn_auv("coverage", cmd["id"], runner, env, meta, "/tmp/coral_coverage.log", cmd=cmd)
 
     def _start_approach_tag(self, cmd):
         # Front-cam IBVS → VehicleRatesSetpoint (pitch/yaw rates + thrust).
@@ -1112,7 +1125,12 @@ class CoralBehaviours(Node):
             depth = -depth
         arrive = float(cmd.get("arrive_m", os.environ.get("UDRONE_APPROACH_ARRIVE", "0.5")))
         depth_tol = float(cmd.get("depth_tol_m", os.environ.get("UDRONE_APPROACH_DEPTH_TOL", "0.25")))
-        speed = float(cmd.get("speed_mps", os.environ.get("UDRONE_APPROACH_SPEED", "0.25")))
+        if cmd.get("speed_mps") not in (None, ""):
+            speed = float(cmd["speed_mps"])
+        elif cmd.get("power_pct") not in (None, ""):
+            speed = 0.25 * mp.normalize_power(cmd["power_pct"])
+        else:
+            speed = float(os.environ.get("UDRONE_APPROACH_SPEED", "0.25"))
         settle = float(cmd.get("settle_s", os.environ.get("UDRONE_APPROACH_SETTLE", "3")))
         timeout = float(cmd.get("timeout_s", os.environ.get("UDRONE_APPROACH_TIMEOUT", "90")))
         acquire = float(cmd.get("acquire_s", os.environ.get("UDRONE_APPROACH_ACQUIRE", "25")))
@@ -1192,7 +1210,7 @@ class CoralBehaviours(Node):
         if ce is not None and cn is not None:
             meta["center_east_m"] = float(ce)
             meta["center_north_m"] = float(cn)
-        self._spawn_auv("approach", cmd["id"], runner, env, meta, "/tmp/coral_approach.log")
+        self._spawn_auv("approach", cmd["id"], runner, env, meta, "/tmp/coral_approach.log", cmd=cmd)
 
     def _finish_coverage(self, tag_detected: bool, detection=None):
         meta = dict(self._helix_meta or {})
@@ -1209,7 +1227,21 @@ class CoralBehaviours(Node):
         self._clear_job()
         self._emit(ev)
 
-    def _spawn_auv(self, kind: str, cid: str, runner: str, env: dict, meta: dict, log_path: str):
+    def _with_power(self, cmd: dict, env: dict, meta: dict | None = None) -> dict:
+        """Stamp UDRONE_POWER_PCT so runners share one energy / smoothness knob."""
+        raw = cmd.get("power_pct", cmd.get("power"))
+        if raw in (None, ""):
+            return env
+        pct = mp.power_pct(raw)
+        env = {**env, "UDRONE_POWER_PCT": str(pct)}
+        if meta is not None:
+            meta["power_pct"] = pct
+        return env
+
+    def _spawn_auv(self, kind: str, cid: str, runner: str, env: dict, meta: dict,
+                   log_path: str, cmd: dict | None = None):
+        if cmd is not None:
+            env = self._with_power(cmd, env, meta)
         self.busy = True
         self.phase = kind
         self.active_id = cid

@@ -162,7 +162,7 @@ Commands:
 {"type":"swim","north_m"?, "east_m"?, "along_heading_m"?, "relative_to":"current"|"world"|"heading", "depth_m"?, "speed_mps"?, "arrive_m"?, "id"?}
 {"type":"hoop","id"?}
 {"type":"track","duration_s"?, "standoff_m"?, "id"?}
-{"type":"rendezvous","id"?}
+{"type":"rendezvous","power_pct"?, "id"?}
 {"type":"shape","shape":"infinity"|"orbit"|"loop", "size_m"?, "loops"?, "speed_mps"?, "id"?}
 {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?, "z_top"?, "z_bottom"?, "speed_mps"?, "center_east_m"?, "center_north_m"?, "until"?: "tag_detected","id"?}
 {"type":"approach_tag","tag_id"?, "standoff_m"?, "tag_size_m"?, "settle_s"?, "timeout_s"?, "acquire_s"?, "search_budget_s"?, "search_r0_m"?, "search_r_max_m"?, "center_east_m"?, "center_north_m"?, "id"?}
@@ -176,7 +176,7 @@ Commands:
 | `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
 | `hoop` | xudrone | front-camera search for the orange ring, then one smooth join onto the centerline through the opening. A pass needs the ring around the optical axis and the hull inside the opening at ENU (6, 0, −1). Rejected while latched. HUD: `/xudrone/hud/image` (every task) |
 | `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
-| `rendezvous` | xudrone | Nest-axis dock under otter_k. Spiral is centred on the weld nest (Heron origin, between the pontoons). Tag 10 finds the deck; the servo pulls onto boat −Z (normal to the deck) so the hull stays between the pontoons with plates parallel. Acceptance cone: 30° half-angle, 2.5 m, heading ≤25°, plate tilt ≤35°. Climb along the nest axis and ATTACH inside 0.45 m / 22° (weld gate 0.6 m / 30°). Phrase `xudrone, rendezvous and dock with otter_k` |
+| `rendezvous` | xudrone | Nest-axis dock under otter_k. Spiral is centred on the weld nest (Heron origin, between the pontoons). Tag 10 finds the deck; the servo pulls onto boat −Z (normal to the deck) so the hull stays between the pontoons with plates parallel. Acceptance cone: 30° half-angle, 2.5 m, heading ≤25°, plate tilt ≤35°. Climb along the nest axis and ATTACH inside 0.45 m / 22° (weld gate 0.6 m / 30°). Optional `power_pct` (5–100) scales thrust and pace (smoother when lower). Phrase `xudrone, rendezvous and dock with otter_k` or `… with 50% power` |
 | `shape` | xudrone | Infinity / orbit / vertical loop on the force loop (detach first). Phrase e.g. `xudrone, fly an infinity pattern of 3m loops` |
 | `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected`; `--plan map` uses the costmap |
 | `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
@@ -210,16 +210,44 @@ docker exec digital-twin-aquatic coral_cmd.py swim --north 10
 docker exec digital-twin-aquatic coral_cmd.py hoop
 docker exec digital-twin-aquatic coral_cmd.py track --duration 90 --standoff 1
 docker exec digital-twin-aquatic coral_cmd.py rendezvous
+docker exec digital-twin-aquatic coral_cmd.py rendezvous --power 50
 docker exec digital-twin-aquatic coral_cmd.py coverage --width 12 --length 12 --layers 3
 docker exec digital-twin-aquatic coral_cmd.py approach_tag --standoff 1.5 --east 5 --north 4 --world
 docker exec digital-twin-aquatic coral_cmd.py dock attach
 ```
+
+`power_pct` / `--power` (5–100) is the maneuver energy knob for AUV steps: it
+caps thrust, softens the force-loop gains, and scales reference pace (spiral,
+climb, optical close, default swim/coverage/approach speeds). Lower is slower
+and smoother; omit for full authority.
+
+Rendezvous chase/climb/blend defaults come from a residual PPO run
+(`behaviours/rendezvous_rl_experiment.py`): chase 0.51 m/s, climb 0.21 m/s,
+nest-axis blend 0.72, close rate 0.148. Override with `UDRONE_RDV_CHASE`,
+`UDRONE_RDV_CLIMB`, `UDRONE_RDV_BLEND`, `UDRONE_RDV_CLOSE_RATE`. Dock climb is
+gated by lateral error so off-axis drift does not eject the hull from the
+cone. Live smoke 2026-11-16 latched under otter_k at full power with those
+knobs.
+
+Re-run the kinematic RL loop (no Gazebo; teacher = `rendezvous_geom`):
+
+```bash
+docker exec -w /root/udrone_boat/behaviours digital-twin-aquatic \
+  python3 rendezvous_rl_experiment.py
+```
+
+JSON report includes per-scenario latch rates and the learned mean knobs
+(default 8 rounds × 2 agents). Copy those into `LEARNED_*` /
+`DOCK_CLIMB_MPS` in `rendezvous_geom.py` (and redeploy) to ship a new residual.
+`maneuver_power.py` + `test_maneuver_power.py` cover the `power_pct` /
+spoken-power parsing used by coral and the force loop.
 
 Example LLM-facing plans (tesseract `coral_bridge`):
 - *undock → short coverage until tag → approach the tag* → `dock detach`,
   `coverage(until=tag_detected)`, `approach_tag`
 - *undock, search for and approach tag, then rendezvous with otter_k* →
   `dock detach`, `approach_tag`, `rendezvous` (direct phrase; no LLM)
+- *rendezvous with otter_k with 50% power* → `rendezvous(power_pct=50)`
 
 One command at a time (`busy` rejects overlaps); `abort` cancels. Multi-step
 instruction plans advance on `*_done` (e.g. `approach_done` → nest rendezvous).

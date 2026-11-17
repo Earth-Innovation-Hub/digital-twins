@@ -30,7 +30,12 @@ CONE_YAW = YAW_GATE
 CONE_TILT = math.radians(35.0)  # body plates must be this parallel to enter the cone
 CONE_EXIT = 1.3                 # leave the cone only past this factor (hysteresis)
 DOCK_STANDOFF_M = 0.20          # axis point the climb aims at, below the nest
-DOCK_CLIMB_MPS = 0.15
+# Residual PPO defaults (rendezvous_rl_experiment.py, kinematic, 2026-11-16):
+# chase/climb up, nest-axis blend ~0.72. lead_m stayed 0 (not used live yet).
+DOCK_CLIMB_MPS = 0.21
+LEARNED_CHASE_MPS = 0.51
+LEARNED_CLOSE_RATE = 0.148
+LEARNED_BLEND = 0.718
 # Deck tag sits a little above the nest on the Heron underside; keep a floor
 # under the hull while still lining up on the nest axis.
 SEARCH_DEPTH_M = 1.15
@@ -182,13 +187,24 @@ def cone_state(auv_pos, auv_q, boat_pos, boat_q, scale: float = 1.0):
     }
 
 
-def dock_goal(cone, along_now: float, dt: float):
+def dock_goal(cone, along_now: float, dt: float, climb_mps: float = DOCK_CLIMB_MPS):
     """Next point on the nest axis, climbing toward DOCK_STANDOFF_M under the nest.
 
     `along_now` is the axis distance the previous goal used. Returns
-    (point, along) so the caller can keep climbing from there.
+    (point, along) so the caller can keep climbing from there. `climb_mps`
+    is scaled by maneuver power for slower, smoother docks.
+
+    Climb is gated by lateral error: shrinking `along` while still off-axis
+    grows the off-axis angle and kicks the hull out of the cone (live smoke
+    with PPO climb 0.21 exited at ~39°). Hold depth until centred, then climb.
     """
-    along = max(DOCK_STANDOFF_M, float(along_now) - DOCK_CLIMB_MPS * max(0.0, float(dt)))
+    climb = max(0.02, float(climb_mps))
+    along0 = max(DOCK_STANDOFF_M, float(along_now))
+    lateral = abs(float(cone.get("lateral", 0.0)))
+    # Half the cone width at current along; full climb only inside ~50% of that.
+    half_w = max(0.05, along0 * math.tan(CONE_HALF) * 0.5)
+    climb *= max(0.0, 1.0 - lateral / half_w)
+    along = max(DOCK_STANDOFF_M, along0 - climb * max(0.0, float(dt)))
     nest, down = cone["nest"], cone["down"]
     return tuple(nest[i] + along * down[i] for i in range(3)), along
 

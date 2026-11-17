@@ -117,9 +117,14 @@ def main():
     # The climb moves up the axis at a bounded rate and stops short of the nest.
     s = cone_state((10.0, 5.0, -1.5), LEVEL, boat, LEVEL)
     pt, along = dock_goal(s, 1.5, 1.0)
-    assert abs(along - 1.35) < 1e-9 and abs(pt[2] + 1.35) < 1e-9 and pt[:2] == (10.0, 5.0)
+    # Climb default is LEARNED 0.21 m/s (was 0.15); on-axis → full climb.
+    assert abs(along - 1.29) < 1e-9 and abs(pt[2] + 1.29) < 1e-9 and pt[:2] == (10.0, 5.0)
     _pt, along = dock_goal(s, 0.25, 10.0)
     assert along == DOCK_STANDOFF_M
+    # Off-axis: climb holds so along does not shrink (avoids cone-angle exit).
+    s_off = cone_state((10.6, 5.0, -1.5), LEVEL, boat, LEVEL)
+    _pt, along_hold = dock_goal(s_off, 1.5, 1.0)
+    assert abs(along_hold - 1.5) < 1e-9
 
     rim = cone_rim(s["nest"], s["down"])
     assert len(rim) == 25

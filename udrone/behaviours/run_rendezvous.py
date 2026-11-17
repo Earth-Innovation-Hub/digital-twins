@@ -35,12 +35,17 @@ except ImportError:
 
 from patterns import world_offset_to_path
 from servo_geom import phase, relock_leg
+import maneuver_power as mp
 from rendezvous_geom import (
     CONE_EXIT,
     CONE_HALF,
     CONE_RANGE_M,
+    DOCK_CLIMB_MPS,
     DOCK_STANDOFF_M,
     LAND_RANGE_M,
+    LEARNED_BLEND,
+    LEARNED_CHASE_MPS,
+    LEARNED_CLOSE_RATE,
     closing_range,
     cone_rim,
     cone_state,
@@ -91,15 +96,32 @@ class UdroneRendezvous(UdroneHelixController):
     def __init__(self, **kwargs):
         self.budget_s = float(os.environ.get("UDRONE_RENDEZVOUS_BUDGET", BUDGET_S))
         self.tag_id = int(float(os.environ.get("UDRONE_RENDEZVOUS_TAG_ID", TAG_ID)))
-        kwargs.setdefault("duration_s", self.budget_s + 30.0)
+        self._power = mp.from_env()
+        # PPO residual defaults (env overrides for A/B). Still scaled by power.
+        chase0 = float(os.environ.get("UDRONE_RDV_CHASE", LEARNED_CHASE_MPS))
+        climb0 = float(os.environ.get("UDRONE_RDV_CLIMB", DOCK_CLIMB_MPS))
+        close0 = float(os.environ.get("UDRONE_RDV_CLOSE_RATE", LEARNED_CLOSE_RATE))
+        blend0 = float(os.environ.get("UDRONE_RDV_BLEND", LEARNED_BLEND))
+        pace = max(0.08, mp.scale(chase0, self._power))
+        kwargs.setdefault("duration_s", self.budget_s / max(0.35, self._power) + 30.0)
         kwargs.setdefault("radius", 0.1)
         kwargs.setdefault("omega", 0.1)
-        kwargs.setdefault("x_rate", 0.25)
+        kwargs.setdefault("x_rate", pace)
         kwargs.setdefault("z0", -1.0)
         super().__init__(**kwargs)
+        self.power = self._power
+        self._climb_mps = mp.scale(climb0, self._power)
+        self._close_rate = mp.scale(close0, self._power)
+        self._blend0 = max(0.35, min(1.0, blend0))
+        self._spiral_omega = mp.scale(0.40, self._power)
+        self._spiral_grow = mp.scale(0.12, self._power)
         self.fx = self.fy = 380.0
         self.cx, self.cy = 320.0, 240.0
         self._stage = "search"
+        self.get_logger().info(
+            f"rendezvous power={100.0 * self._power:.0f}% "
+            f"chase={pace:.2f} climb={self._climb_mps:.2f} blend0={self._blend0:.2f}"
+        )
         self._search_t0 = None
         self._des = None
         self._vel = (0.0, 0.0, 0.0)
@@ -224,7 +246,9 @@ class UdroneRendezvous(UdroneHelixController):
         self._transit = False
         if self._search_t0 is None:
             self._search_t0 = tm
-        de, dn, _r = search_offset(tm - self._search_t0)
+        de, dn, _r = search_offset(
+            tm - self._search_t0, r_rate=self._spiral_grow, omega=self._spiral_omega,
+        )
         return (float(nest[0]) + de, float(nest[1]) + dn, z), (0.0, 0.0, 0.0)
 
     def _servo_goal(self, tm, auv, boat):
@@ -241,12 +265,15 @@ class UdroneRendezvous(UdroneHelixController):
                 f"level=({self._det[0]:+.2f},{self._det[1]:+.2f})",
                 flush=True,
             )
-        optical = closing_range(self._lock_range, tm - self._lock_tm, LAND_RANGE_M)
+        optical = closing_range(
+            self._lock_range, tm - self._lock_tm, LAND_RANGE_M, rate=self._close_rate,
+        )
         # Tag finds the deck; nest axis keeps the hull between the pontoons.
-        # Blend in over the first metre of closing so the snap is not a jerk.
+        # PPO preferred ~0.72 nest pull early; rise to 1.0 as optical range closes.
         # Heading alignment is yaw_hold in _control — do not lead off the nest axis.
         closed = max(0.0, self._lock_range - optical)
-        blend = min(1.0, 0.35 + closed / max(0.5, self._lock_range - LAND_RANGE_M))
+        span = max(0.5, self._lock_range - LAND_RANGE_M)
+        blend = min(1.0, self._blend0 + (1.0 - self._blend0) * min(1.0, closed / span))
         station = servo_station(tag, optical, boat[0], boat[1], CAM_Z, blend=blend)
         return station, (0.0, 0.0, 0.0)
 
@@ -265,7 +292,9 @@ class UdroneRendezvous(UdroneHelixController):
                 f"tilt={math.degrees(cone['tilt']):.0f}deg",
                 flush=True,
             )
-        point, self._dock_along = dock_goal(cone, self._dock_along, tm - self._dock_tm)
+        point, self._dock_along = dock_goal(
+            cone, self._dock_along, tm - self._dock_tm, climb_mps=self._climb_mps,
+        )
         self._dock_tm = tm
         if cone["weld"]:
             if self._weld_tm is None:

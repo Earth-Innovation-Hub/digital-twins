@@ -194,7 +194,17 @@ def _hud_module():
     return hud_overlay
 
 
+def _maneuver_power():
+    here = os.path.dirname(os.path.abspath(__file__))
+    for folder in (here, os.path.abspath(os.path.join(here, "..", "behaviours"))):
+        if os.path.isfile(os.path.join(folder, "maneuver_power.py")) and folder not in sys.path:
+            sys.path.insert(0, folder)
+    import maneuver_power
+    return maneuver_power
+
+
 _pf = _pose_frame()
+_mp = _maneuver_power()
 ned_to_enu = _pf.ned_to_enu
 px4_q_to_enu = _pf.px4_q_to_enu
 
@@ -527,6 +537,9 @@ class UdroneHelixController(Node):
         self.progress_gate = False   # reference waits for the hull (swim, shape, coverage)
         self.path_t = 0.0            # reference clock; equals thrust time without the gate
         self._gate_rate = 1.0
+        # Fraction of full thrust / gains (UDRONE_POWER_PCT or set_power). Lower is
+        # slower and smoother; 1.0 is the historical full-authority loop.
+        self.power = _mp.from_env()
         self._err_n = 0.0
         self.keep_armed = os.environ.get("UDRONE_KEEP_ARMED", "") == "1"
         self.offers_baton = False    # the hold runner owns the baton while it flies
@@ -975,10 +988,12 @@ class UdroneHelixController(Node):
         self._err_n = norm(err)
         if self._hold_point is None:
             self.path_t = self.path_t + rate * dt if self.progress_gate else tm
-        corr = tuple(KP_POS * e for e in err)
+        gs = _mp.gain_scale(self.power)
+        corr = tuple(KP_POS * gs * e for e in err)
         n = norm(corr)
-        if n > V_CORR_MAX:
-            corr = tuple(v * V_CORR_MAX / n for v in corr)
+        v_corr_max = V_CORR_MAX * max(self.power, _mp.GAIN_FLOOR)
+        if n > v_corr_max:
+            corr = tuple(v * v_corr_max / n for v in corr)
         v_cmd = tuple(a + b for a, b in zip(v_des, corr))
 
         docked = self.latch.state == "attached"
@@ -991,15 +1006,18 @@ class UdroneHelixController(Node):
         # geometric feedforward (the curve's own acceleration, as in a
         # differentially flat tracker). The velocity term closes the error.
         # Drag is cancelled at the commanded velocity, then buoyancy.
+        # power scales feedforward and thrust so low % is slower and smoother.
         vb = (dot(v_cmd, fwd), dot(v_cmd, left), dot(v_cmd, up))
         drag_b = tuple(DRAG_LIN[i] * vb[i] + DRAG_QUAD[i] * vb[i] * abs(vb[i]) for i in range(3))
         drag_w = tuple(fwd[i] * drag_b[0] + left[i] * drag_b[1] + up[i] * drag_b[2] for i in range(3))
-        force = [MASS_KG * (KV * (v_cmd[i] - self.vel[i]) + a_w[i]) + drag_w[i] for i in range(3)]
+        force = [
+            MASS_KG * (KV * gs * (v_cmd[i] - self.vel[i]) + self.power * a_w[i]) + drag_w[i]
+            for i in range(3)
+        ]
         force[2] -= NET_BUOYANCY_N + self.depth_i
         fn = norm(force)
-        # No guidance force ceiling. The command saturates at full throttle,
-        # which is SURGE_N_PER_UNIT along the hull.
-        thrust = clamp(dot(force, fwd) / SURGE_N_PER_UNIT, 1.0)
+        # Throttle ceiling is the maneuver power (1.0 = full SURGE_N_PER_UNIT).
+        thrust = clamp(dot(force, fwd) / SURGE_N_PER_UNIT, self.power)
         roll_u = pitch_u = yaw_u = 0.0
         if not docked:
             self._dir = self._hull_dir(force, fwd, fn)
@@ -1009,9 +1027,10 @@ class UdroneHelixController(Node):
             if dot(fwd, self._dir) < 0.0:       # more than 90 deg off: full error
                 rn = norm(rot)
                 rot = tuple(r / rn for r in rot) if rn > 1e-6 else left
+            tq = TORQUE_MAX * gs
             pitch_u = clamp(
-                KP_PITCH * dot(rot, left) - KD_PITCH * self.w_body[1] - GRAVITY_FF * fwd[2], TORQUE_MAX)
-            yaw_u = clamp(KP_YAW * dot(rot, up) - KD_YAW * self.w_body[2], TORQUE_MAX)
+                KP_PITCH * gs * dot(rot, left) - KD_PITCH * self.w_body[1] - GRAVITY_FF * fwd[2], tq)
+            yaw_u = clamp(KP_YAW * gs * dot(rot, up) - KD_YAW * self.w_body[2], tq)
 
         # Log in the path frame.
         roll, pitch, yaw = rpy_from_q(q)
