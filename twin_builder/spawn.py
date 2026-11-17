@@ -184,10 +184,10 @@ exec vglrun make px4_sitl gz_x500_gimbal >> /root/log/twin.log 2>&1
 _SPHERICAL_RE = re.compile(r"<spherical_coordinates>.*?</spherical_coordinates>", re.S)
 
 
-def _origin_block(lat, lon, elev):
+def _origin_block(lat, lon, elev, surface="EARTH_WGS84"):
     return (
         "    <spherical_coordinates>\n"
-        "      <surface_model>EARTH_WGS84</surface_model>\n"
+        f"      <surface_model>{surface}</surface_model>\n"
         "      <world_frame_orientation>ENU</world_frame_orientation>\n"
         f"      <latitude_deg>{float(lat):.8f}</latitude_deg>\n"
         f"      <longitude_deg>{float(lon):.8f}</longitude_deg>\n"
@@ -197,17 +197,18 @@ def _origin_block(lat, lon, elev):
     )
 
 
-def apply_site(text, look, props_xml=""):
+def apply_site(text, look, props_xml="", surface="EARTH_WGS84"):
     """Force the world GPS origin to the viewport and splice generated models.
 
     Replaces an existing spherical_coordinates block. The Locutus image ships
     with Bishop Scarp in default.sdf, and PX4/QGC read that block as home.
+    A lunar session uses MOON_SCS so the home latitude is on the Moon.
     """
     lat, lon = look.get("lat"), look.get("lon")
     if not (isinstance(lat, (int, float)) and isinstance(lon, (int, float))):
         return text
     elev = look.get("elev_m") or 0
-    block = _origin_block(lat, lon, elev)
+    block = _origin_block(lat, lon, elev, surface)
     if _SPHERICAL_RE.search(text):
         text = _SPHERICAL_RE.sub(block, text, count=1)
     else:
@@ -216,6 +217,67 @@ def apply_site(text, look, props_xml=""):
             text = text.replace(needle, needle + "\n" + block, 1)
     if props_xml and 'name="prop_' not in text and "</world>" in text:
         text = text.replace("</world>", props_xml + "  </world>", 1)
+    return text
+
+
+_GROUND_RE = re.compile(r'<model name="ground_plane">.*?</model>', re.S)
+
+
+def apply_moon_terrain(text, width_m, length_m, z_min, z_span,
+                       uri="/root/moon_heightmap.png", texture_uri="", normal_uri=""):
+    """Replace the infinite ground plane with a heightmap.
+
+    Pixel 0 is z_min and a full white pixel is z_min + z_span. The patch is
+    centred on the spawn. texture_uri, when set together with normal_uri, is
+    the satellite PNG draped on the visual. The normal is required: the SDF
+    schema otherwise inserts ``__default__`` and Gazebo refuses the world.
+    The collision is the heightmap either way.
+    """
+    texture = ""
+    if texture_uri and normal_uri:
+        cover = max(float(width_m), float(length_m))
+        texture = (
+            "              <texture>\n"
+            f"                <size>{cover:.2f}</size>\n"
+            f"                <diffuse>{texture_uri}</diffuse>\n"
+            f"                <normal>{normal_uri}</normal>\n"
+            "              </texture>\n"
+        )
+    heightmap = (
+        "            <heightmap>\n"
+        f"              <uri>{uri}</uri>\n"
+        f"              <size>{width_m:.2f} {length_m:.2f} {z_span:.3f}</size>\n"
+        f"              <pos>0 0 {z_min:.3f}</pos>\n"
+        "{visual_extra}"
+        "            </heightmap>\n"
+    )
+    model = (
+        '<model name="ground_plane">\n'
+        "      <static>true</static>\n"
+        "      <pose>0 0 0 0 0 0</pose>\n"
+        '      <link name="link">\n'
+        '        <collision name="collision">\n'
+        "          <geometry>\n"
+        + heightmap.format(visual_extra="")
+        + "          </geometry>\n"
+        "        </collision>\n"
+        '        <visual name="visual">\n'
+        "          <geometry>\n"
+        + heightmap.format(visual_extra=texture)
+        + "          </geometry>\n"
+        "          <material>\n"
+        "            <ambient>0.45 0.42 0.38 1</ambient>\n"
+        "            <diffuse>0.62 0.58 0.52 1</diffuse>\n"
+        "            <specular>0.05 0.05 0.05 1</specular>\n"
+        "          </material>\n"
+        "        </visual>\n"
+        "      </link>\n"
+        "    </model>"
+    )
+    if _GROUND_RE.search(text):
+        return _GROUND_RE.sub(model, text, count=1)
+    if "</world>" in text:
+        return text.replace("</world>", model + "\n  </world>", 1)
     return text
 
 
@@ -231,15 +293,39 @@ def _patched_world(artifact, dest, image):
         return None
     from .sdf_props import props_xml_fragment
     from .satellite_ground import apply_ground
+    lunar = artifact.get("body") == "moon"
     lat, lon = look.get("lat"), look.get("lon")
     fragment = ""
-    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and not lunar:
         fragment, _clean = props_xml_fragment(artifact.get("props") or [], lat, lon)
-    text = apply_site(proc.stdout, look, fragment)
-    size = artifact.get("ground_size_m") or []
-    ground = artifact.get("ground_image")
-    if ground and Path(ground).is_file() and len(size) >= 2:
-        text = apply_ground(text, float(size[0]), float(size[1]))
+    text = apply_site(proc.stdout, look, fragment, "MOON_SCS" if lunar else "EARTH_WGS84")
+    hm = artifact.get("heightmap_image")
+    if hm and Path(hm).is_file():
+        mount = artifact.get("heightmap_mount") or (
+            "/root/moon_heightmap.png" if lunar else "/root/earth_heightmap.png")
+        tex = ""
+        normal = ""
+        diffuse = artifact.get("diffuse_image")
+        normal_image = artifact.get("normal_image")
+        if (not lunar and diffuse and normal_image
+                and Path(diffuse).is_file() and Path(normal_image).is_file()):
+            tex = artifact.get("diffuse_mount") or "/root/earth_diffuse.png"
+            normal = artifact.get("normal_mount") or "/root/earth_normal.png"
+        text = apply_moon_terrain(
+            text,
+            float(artifact.get("width_m") or 150),
+            float(artifact.get("length_m") or 150),
+            float(artifact.get("heightmap_z_min") or 0),
+            float(artifact.get("heightmap_span") or 1),
+            mount,
+            tex,
+            normal,
+        )
+    else:
+        size = artifact.get("ground_size_m") or []
+        ground = artifact.get("ground_image")
+        if ground and Path(ground).is_file() and len(size) >= 2:
+            text = apply_ground(text, float(size[0]), float(size[1]))
     dest.write_text(text, encoding="utf-8")
     return dest
 
@@ -430,6 +516,7 @@ def write_session_meta(callsign, artifact, extra=None):
         "gz_partition": callsign,
         "dds_ns": _dds_ns(callsign),
         "host_port": artifact.get("host_port"),
+        "body": artifact.get("body") or "earth",
     }
     if extra:
         meta.update(extra)
@@ -463,7 +550,9 @@ def spawn_session(artifact, dry_run=False):
             f"DEEPGIS_CALLSIGN={callsign}",
             f"DEEPGIS_LAT={artifact['look_at']['lat']}",
             f"DEEPGIS_LON={artifact['look_at']['lon']}",
-        ]) + "\n",
+        ] + ([
+            f"PX4_GZ_MODEL_POSE=0,0,{float(artifact.get('spawn_z') or 15):.2f},0,0,0",
+        ] if artifact.get("body") == "moon" or artifact.get("heightmap_image") else [])) + "\n",
         encoding="utf-8",
     )
     script_path = session_dir(callsign) / "start_session.sh"
@@ -499,9 +588,25 @@ def spawn_session(artifact, dry_run=False):
     ]
     if world_file is not None:
         args += ["-v", f"{world_file}:/root/PX4-Autopilot/Tools/simulation/gz/worlds/default.sdf:ro"]
+    heightmap = artifact.get("heightmap_image")
+    has_heightmap = bool(heightmap and Path(heightmap).is_file())
     ground = artifact.get("ground_image")
-    if ground and Path(ground).is_file():
+    if ground and Path(ground).is_file() and not has_heightmap:
         args += ["-v", f"{ground}:/root/ground.jpg:ro"]
+    if has_heightmap:
+        mount = artifact.get("heightmap_mount") or (
+            "/root/moon_heightmap.png" if artifact.get("body") == "moon" else "/root/earth_heightmap.png")
+        args += ["-v", f"{heightmap}:{mount}:ro"]
+        diffuse = artifact.get("diffuse_image")
+        normal_image = artifact.get("normal_image")
+        if (diffuse and normal_image and Path(diffuse).is_file()
+                and Path(normal_image).is_file()):
+            diffuse_mount = artifact.get("diffuse_mount") or "/root/earth_diffuse.png"
+            normal_mount = artifact.get("normal_mount") or "/root/earth_normal.png"
+            args += [
+                "-v", f"{diffuse}:{diffuse_mount}:ro",
+                "-v", f"{normal_image}:{normal_mount}:ro",
+            ]
     args += [
         *publish_args(host_port),
         image,
@@ -619,6 +724,17 @@ def _frames_command(dds_ns):
     )
 
 
+def _session_vehicle_name(callsign):
+    """Name posted with the pose. The Moon page follows only a Moon session."""
+    try:
+        meta = json.loads((session_dir(callsign) / "session.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        meta = {}
+    if meta.get("body") == "moon":
+        return "Moon session kestrel"
+    return "Session kestrel"
+
+
 def _start_frames(callsign):
     """Share the session gimbal with DeepGIS and register the vehicle by posting pose.
 
@@ -660,7 +776,7 @@ def _start_frames(callsign):
         "-e", "PYTHONDONTWRITEBYTECODE=1",
         "-e", f"ROS_DOMAIN_ID={_domain_id(callsign)}",
         "-e", f"DEEPGIS_VEHICLE={callsign}",
-        "-e", "DEEPGIS_VEHICLE_NAME=Session kestrel",
+        "-e", f"DEEPGIS_VEHICLE_NAME={_session_vehicle_name(callsign)}",
         "-e", f"DEEPGIS_POSE_URL={pose_url}",
         "-e", f"DEEPGIS_FRAME_URL={frame_url}",
         "-e", f"DEEPGIS_FRAME_TOPIC=/{dds}/camera/image",

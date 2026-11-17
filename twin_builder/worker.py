@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import bake, osm_buildings, satellite_ground, spawn, vlm_props
+from . import bake, capture, osm_buildings, rasters, satellite_ground, spawn, vlm_props
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -73,36 +73,77 @@ def _run_job(job_id):
                 nadir_path = JOB_ROOT / job_id / "viewport.jpg"
                 nadir_path.parent.mkdir(parents=True, exist_ok=True)
                 nadir_path.write_bytes(raw)
-        set_status("baking", "Reading OpenStreetMap buildings for the patch")
-        try:
-            artifact = bake.bake_job(
-                job, job_root=JOB_ROOT / job_id,
-                nadir_jpeg=str(nadir_path) if nadir_path else None,
-            )
-        except Exception as bake_error:
-            # Heightmap bake is best-effort. GPS and props are applied to the
-            # world PX4 actually loads, inside spawn.
-            artifact = {
-                "callsign": job["callsign"],
-                "look_at": job["look_at"],
-                "bbox": job.get("bbox") or {},
-                "airframe": "x500_gimbal",
-                "world_sdf": "",
-                "props": [],
-                "bake_error": f"{type(bake_error).__name__}: {str(bake_error)[:160]}",
-            }
-        if not artifact.get("props") and nadir_path:
-            artifact["props"] = vlm_props.detect_props(
-                nadir_path, job["look_at"], job.get("bbox") or {},
-            )
-        osm = osm_buildings.buildings_in_job(job)
-        artifact["props"] = osm_buildings.merge_buildings(artifact.get("props") or [], osm)
-        artifact["osm_buildings"] = len(osm)
-        set_status("baking", "Fetching the satellite ground for the patch")
-        ground = satellite_ground.fetch_ground(job, JOB_ROOT / job_id / "ground.jpg")
-        if ground:
-            artifact["ground_image"] = ground["path"]
-            artifact["ground_size_m"] = [ground["width_m"], ground["length_m"]]
+        if job.get("body") == "moon":
+            set_status("baking", "Writing the lunar elevation heightmap")
+            try:
+                artifact = bake.bake_moon(
+                    job, job_root=JOB_ROOT / job_id,
+                    nadir_jpeg=str(nadir_path) if nadir_path else None,
+                )
+            except Exception as moon_error:
+                set_status(
+                    "failed",
+                    f"Lunar terrain: {type(moon_error).__name__}: {str(moon_error)[:160]}",
+                )
+                return
+        else:
+            artifact = None
+            if job.get("dem"):
+                # The page sampled Cesium World Terrain. That grid is the ground.
+                # A failure here must not fall through to a flat satellite plane.
+                set_status("baking", "Writing the terrain heightmap")
+                try:
+                    artifact = bake.bake_earth(
+                        job, job_root=JOB_ROOT / job_id,
+                        nadir_jpeg=str(nadir_path) if nadir_path else None,
+                    )
+                except Exception as dem_error:
+                    set_status(
+                        "failed",
+                        f"Terrain: {type(dem_error).__name__}: {str(dem_error)[:160]}",
+                    )
+                    return
+            if artifact is None:
+                set_status("baking", "Reading OpenStreetMap buildings for the patch")
+                try:
+                    artifact = bake.bake_job(
+                        job, job_root=JOB_ROOT / job_id,
+                        nadir_jpeg=str(nadir_path) if nadir_path else None,
+                    )
+                except Exception as bake_error:
+                    # Older clients send no grid. GPS and props still apply to the
+                    # world PX4 loads. Open-Elevation is not the ground of a new page.
+                    artifact = {
+                        "callsign": job["callsign"],
+                        "look_at": job["look_at"],
+                        "bbox": job.get("bbox") or {},
+                        "airframe": "x500_gimbal",
+                        "world_sdf": "",
+                        "props": [],
+                        "bake_error": f"{type(bake_error).__name__}: {str(bake_error)[:160]}",
+                    }
+            else:
+                set_status("baking", "Reading OpenStreetMap buildings for the patch")
+            if not artifact.get("props") and nadir_path:
+                artifact["props"] = vlm_props.detect_props(
+                    nadir_path, job["look_at"], job.get("bbox") or {},
+                )
+            osm = osm_buildings.buildings_in_job(job)
+            artifact["props"] = osm_buildings.merge_buildings(artifact.get("props") or [], osm)
+            artifact["osm_buildings"] = len(osm)
+            set_status("baking", "Fetching the satellite ground for the patch")
+            ground = satellite_ground.fetch_ground(job, JOB_ROOT / job_id / "ground.jpg")
+            if ground:
+                artifact["ground_image"] = ground["path"]
+                artifact["ground_size_m"] = [ground["width_m"], ground["length_m"]]
+                # A heightmap photo has to be a PNG with a normal beside it.
+                # The JPEG stays available for a flat-plane job that has no grid.
+                if artifact.get("heightmap_image") and artifact.get("normal_image"):
+                    diffuse = rasters.satellite_png(
+                        ground["path"], Path(ground["path"]).with_name("earth_diffuse.png"))
+                    if diffuse:
+                        artifact["diffuse_image"] = diffuse
+                        artifact["diffuse_mount"] = "/root/earth_diffuse.png"
         if job.get("host_port") is None and os.environ.get("DEEPGIS_TWIN_SPAWN_DRY_RUN") != "1":
             set_status("failed", "host_port from the simulation registry is required")
             return
@@ -194,6 +235,15 @@ class Handler(BaseHTTPRequestHandler):
                 spawn.publish_args(host_port)
             except (TypeError, ValueError) as e:
                 return self._json(400, {"error": str(e)})
+        body = data.get("body") or "earth"
+        if body not in ("earth", "moon"):
+            return self._json(400, {"error": "body must be earth or moon"})
+        dem = None
+        if body == "moon" or data.get("dem") is not None:
+            try:
+                dem = capture.clean_dem(data.get("dem"))
+            except ValueError as exc:
+                return self._json(400, {"error": str(exc)})
         job = {
             "id": job_id,
             "callsign": callsign,
@@ -201,6 +251,8 @@ class Handler(BaseHTTPRequestHandler):
             "count": 1,
             "width_m": data.get("width_m") or data.get("radius_m") or 150,
             "length_m": data.get("length_m") or data.get("radius_m") or 150,
+            "body": body,
+            "dem": dem,
             "nadir_b64": data.get("nadir_b64") or "",
             "look_at": data.get("look_at") or {},
             "bbox": data.get("bbox") or {},

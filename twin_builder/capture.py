@@ -50,12 +50,48 @@ def sample_dem(bbox, grid=GRID):
     return elevs, min(elevs), max(elevs)
 
 
-def write_heightmap_png(path, elevs, grid=GRID):
-    """16-bit grayscale PNG heightmap (L16) without Pillow — raw zlib PNG."""
+def clean_dem(raw):
+    """A client elevation grid: odd size 17–129, one finite height per cell.
+
+    Heights are metres relative to the look-at, row-major from north to south
+    and west to east. Raises ValueError when the grid cannot become a heightmap.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("elevation grid is required")
+    grid = raw.get("grid")
+    heights = raw.get("heights")
+    if (isinstance(grid, bool) or not isinstance(grid, int)
+            or grid < 17 or grid > 129 or grid % 2 == 0):
+        raise ValueError("elevation grid is not usable")
+    if not isinstance(heights, list) or len(heights) != grid * grid:
+        raise ValueError("elevation grid is not usable")
+    out = []
+    for value in heights:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("elevation grid is not usable")
+        height = float(value)
+        if not math.isfinite(height) or abs(height) > 20000:
+            raise ValueError("elevation grid is not usable")
+        out.append(height)
+    # The centre cell is the look-at. A grid whose centre is tens of metres
+    # off was sampled against the ellipsoid instead of the terrain, and the
+    # vehicle would spawn inside the mesh.
+    center = out[(grid // 2) * grid + (grid // 2)]
+    if abs(center) > 30:
+        raise ValueError("elevation grid is not centred on the look-at")
+    return {"grid": grid, "heights": out}
+
+
+def write_heightmap_png(path, elevs, grid=GRID, min_span=1.0):
+    """16-bit grayscale PNG heightmap (L16) without Pillow — raw zlib PNG.
+
+    Pixel 0 is the lowest sample and 65535 the highest. `span` is the vertical
+    distance those two pixels represent, which the SDF heightmap size must use.
+    """
     import zlib
 
     mn, mx = min(elevs), max(elevs)
-    span = max(mx - mn, 1.0)
+    span = max(mx - mn, min_span)
     rows = []
     for i in range(grid):
         row = bytearray([0])  # filter none
@@ -73,7 +109,7 @@ def write_heightmap_png(path, elevs, grid=GRID):
     ihdr = struct.pack(">IIBBBBB", grid, grid, 16, 0, 0, 0, 0)  # 16-bit grayscale
     png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", compressed) + chunk(b"IEND", b"")
     Path(path).write_bytes(png)
-    return {"min_z": mn, "max_z": mx, "size": grid, "path": str(path)}
+    return {"min_z": mn, "max_z": mx, "span": span, "size": grid, "path": str(path)}
 
 
 def write_placeholder_ortho(path, size=512):

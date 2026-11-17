@@ -5,7 +5,7 @@ import json
 import shutil
 from pathlib import Path
 
-from . import capture, sdf_props, vlm_props
+from . import capture, rasters, sdf_props, vlm_props
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "kestrel" / "worlds" / "site_template"
 
@@ -77,6 +77,63 @@ def bake_job(job, job_root=None, nadir_jpeg=None, run_vlm=True):
     }
     (root / "job.json").write_text(json.dumps(artifact, indent=2, default=str), encoding="utf-8")
     return artifact
+
+
+def bake_client_dem(job, job_root=None, nadir_jpeg=None, body="earth"):
+    """Heightmap from the terrain grid the page sampled.
+
+    Heights are metres relative to the look-at, so the center of the patch sits
+    near z = 0. The Moon starts the x500 at a fixed 15 m. Earth starts it above
+    the highest cell so a ridge does not contain the vehicle. Open-Elevation is
+    not consulted: the grid is already the terrain drawn on the globe.
+    """
+    dem = capture.clean_dem(job.get("dem"))
+    root = Path(job_root or Path.cwd() / "var" / "twin-jobs" / job["id"])
+    root.mkdir(parents=True, exist_ok=True)
+    info = capture.write_heightmap_png(
+        root / "heightmap.png", dem["heights"], grid=dem["grid"], min_span=0.05)
+    lunar = body == "moon"
+    artifact = {
+        "job_dir": str(root),
+        "world_sdf": "",
+        "callsign": job["callsign"],
+        "look_at": job["look_at"],
+        "bbox": job.get("bbox") or {},
+        "body": "moon" if lunar else "earth",
+        "width_m": float(job["width_m"]),
+        "length_m": float(job["length_m"]),
+        "airframe": "x500_gimbal",
+        "props": [],
+        "heightmap_image": info["path"],
+        "heightmap_z_min": info["min_z"],
+        "heightmap_span": info["span"],
+        "heightmap_mount": "/root/moon_heightmap.png" if lunar else "/root/earth_heightmap.png",
+        "spawn_z": 15.0 if lunar else max(3.0, float(info["max_z"]) + 2.0),
+        "capture": {"grid": dem["grid"], "min_z": info["min_z"], "max_z": info["max_z"]},
+    }
+    if nadir_jpeg and Path(nadir_jpeg).is_file():
+        artifact["nadir"] = str(nadir_jpeg)
+    if not lunar:
+        # The photo drape needs this file. The depth PNG is the mesh either way.
+        artifact["normal_image"] = rasters.write_normal_map(
+            root / "earth_normal.png", dem["heights"], dem["grid"],
+            float(job["width_m"]), float(job["length_m"]))
+        artifact["normal_mount"] = "/root/earth_normal.png"
+    (root / "job.json").write_text(json.dumps(artifact, indent=2, default=str), encoding="utf-8")
+    return artifact
+
+
+def bake_moon(job, job_root=None, nadir_jpeg=None):
+    """Heightmap of a lunar look-at. The grid comes from the Moon viewer's terrain.
+
+    OpenStreetMap and Earth imagery are not used.
+    """
+    return bake_client_dem(job, job_root=job_root, nadir_jpeg=nadir_jpeg, body="moon")
+
+
+def bake_earth(job, job_root=None, nadir_jpeg=None):
+    """Heightmap of an Earth look-at. The grid is Cesium World Terrain, including 3DEP."""
+    return bake_client_dem(job, job_root=job_root, nadir_jpeg=nadir_jpeg, body="earth")
 
 
 # Alias used by deepgis-xr stub import
