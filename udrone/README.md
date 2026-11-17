@@ -176,7 +176,8 @@ Commands:
 | `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
 | `hoop` | xudrone | front-camera search for the orange ring, then one smooth join onto the centerline through the opening. A pass needs the ring around the optical axis and the hull inside the opening at ENU (6, 0, −1). Rejected while latched. HUD: `/xudrone/hud/image` (every task) |
 | `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
-| `rendezvous` | xudrone | Nest-axis dock under otter_k. Spiral is centred on the weld nest (Heron origin, between the pontoons). Tag 10 finds the deck; the servo pulls onto boat −Z (normal to the deck) so the hull stays between the pontoons with plates parallel. Acceptance cone: 30° half-angle, 2.5 m, heading ≤25°, plate tilt ≤35°. Climb along the nest axis and ATTACH inside 0.45 m / 22° (weld gate 0.6 m / 30°). Optional `power_pct` (5–100) scales thrust and pace (smoother when lower). Phrase `xudrone, rendezvous and dock with otter_k` or `… with 50% power` |
+| `search_otter` | xudrone | Aft station → expanding sine until under the nest → lock deck tag 10 (up-cam) — no latch. Chain with `rendezvous`. Phrase `xudrone, search for otter_k` |
+| `rendezvous` | xudrone | Nest-axis dock under otter_k. Aft corridor → up-cam deck tag 10 servo on boat −Z → acceptance cone dock (MPC). Cone: 42° / 3.5 m, heading ≤40°, tilt ≤48°; ATTACH inside 0.55 m / 28° (LinkAttacher still 0.6 m / 30°). Optional `power_pct` (5–100). Phrase `xudrone, rendezvous and dock with otter_k` or `… with 50% power` |
 | `shape` | xudrone | Infinity / orbit / vertical loop on the force loop (detach first). Phrase e.g. `xudrone, fly an infinity pattern of 3m loops` |
 | `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected`; `--plan map` uses the costmap |
 | `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
@@ -187,7 +188,8 @@ Default `tag_size_m` is **0.4** (matches the cube faces / `apriltag.yaml`).
 Perception: otter_k nadir → `/otter_k/detections`; xudrone **front** →
 `/xudrone/detections` (primary until-stop while pitched); xudrone nadir →
 `/xudrone/detections_down` + `tag_detector` ENU / tracks; xudrone **upward** →
-`/xudrone/detections_up` (tag 10 under the deck).
+`/xudrone/detections_up` (deck tag 10). Nest search and rendezvous use that
+underside deck tag only.
 
 `track` is the Kiwanis form of Harish Anand's thesis,
 [Coordinated Navigation and Localization of an Autonomous Underwater Vehicle Using an Autonomous Surface Vehicle in the OpenUAV Simulation Framework](https://keep.lib.asu.edu/_flysystem/fedora/c7/233928/Anand_asu_0010N_20290.pdf)
@@ -226,8 +228,14 @@ Rendezvous chase/climb/blend defaults come from a residual PPO run
 nest-axis blend 0.72, close rate 0.148. Override with `UDRONE_RDV_CHASE`,
 `UDRONE_RDV_CLIMB`, `UDRONE_RDV_BLEND`, `UDRONE_RDV_CLOSE_RATE`. Dock climb is
 gated by lateral error so off-axis drift does not eject the hull from the
-cone. Live smoke 2026-11-16 latched under otter_k at full power with those
-knobs.
+cone. First tag lock caps the close schedule at `SERVO_LOCK_CAP_M` (1.6 m)
+so a deep ~4 m sighting does not command a violent climb. Approach is an aft parallel corridor (`AFT_STANDOFF_M` behind the nest,
+same depth as the under-nest station) then a straight commit onto the
+nest axis; the wide under-boat spiral is only a tiny local loiter if the
+up-cam has not locked yet. Inside the acceptance cone, dock-phase
+receding MPC (`dock_mpc.py`, nest-frame CEM) plans climb vs lateral under
+cone/standoff constraints and feeds `(p, v, a)` to the force loop; set
+`UDRONE_RDV_DOCK_MPC=0` for the classical gated climb.
 
 Re-run the kinematic RL loop (no Gazebo; teacher = `rendezvous_geom`):
 
@@ -246,7 +254,7 @@ Example LLM-facing plans (tesseract `coral_bridge`):
 - *undock → short coverage until tag → approach the tag* → `dock detach`,
   `coverage(until=tag_detected)`, `approach_tag`
 - *undock, search for and approach tag, then rendezvous with otter_k* →
-  `dock detach`, `approach_tag`, `rendezvous` (direct phrase; no LLM)
+  `dock detach`, `rendezvous` (aft corridor + up-cam; direct phrase; no LLM)
 - *rendezvous with otter_k with 50% power* → `rendezvous(power_pct=50)`
 
 One command at a time (`busy` rejects overlaps); `abort` cancels. Multi-step

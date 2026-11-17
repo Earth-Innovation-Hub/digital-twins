@@ -81,9 +81,11 @@ def main():
         assert math.dist(pos, hoop) >= FRONT_CLEAR_M - 1e-6
     assert axis_miss(pos, hoop, "front") < 0.05
 
-    assert abort_pass(2.0, inside=False)
+    assert abort_pass(2.0, inside=False)            # default PASS_LOST_S=1.5
     assert not abort_pass(0.4, inside=False)
     assert not abort_pass(3.0, inside=True)
+    assert not abort_pass(2.0, inside=False, lost_s=4.0)
+    assert abort_pass(4.5, inside=False, lost_s=4.0)
 
     assert prediction_disagrees((0, 0, -1), (1.0, 0, -1))
     assert not prediction_disagrees((0, 0, -1), (DISAGREE_M * 0.5, 0, -1))

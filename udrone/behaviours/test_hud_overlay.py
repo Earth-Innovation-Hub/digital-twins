@@ -1,7 +1,19 @@
 """The HUD projects the world the same way the servos read the cameras."""
 import math
 
-from hud_overlay import RED, CAMERAS, TaskHud, default_intrinsics, map_pixel, map_scale, project
+from hud_overlay import (
+    ATT_PITCH_FULL_DEG,
+    ATT_RADIUS,
+    RED,
+    CAMERAS,
+    TaskHud,
+    attitude_horizon_shift,
+    default_intrinsics,
+    map_pixel,
+    map_scale,
+    project,
+    rpy_from_q,
+)
 from servo_geom import nadir_body
 from track_geom import CAM_Z, up_camera_tag_body
 
@@ -10,6 +22,14 @@ LEVEL = (1.0, 0.0, 0.0, 0.0)
 
 def yaw_q(yaw):
     return (math.cos(yaw / 2.0), 0.0, 0.0, math.sin(yaw / 2.0))
+
+
+def pitch_q(pitch):
+    return (math.cos(pitch / 2.0), 0.0, math.sin(pitch / 2.0), 0.0)
+
+
+def roll_q(roll):
+    return (math.cos(roll / 2.0), math.sin(roll / 2.0), 0.0, 0.0)
 
 
 def close(a, b, tol=1e-6):
@@ -55,6 +75,15 @@ def main():
     assert 85.0 < east[0] < 170.0 and abs(east[1] - 85.0) < 1e-9
     assert north[1] < 85.0 and abs(north[0] - 85.0) < 1e-9
     assert map_scale(centre, [(500.0, 0.0, 0.0)]) == map_scale(centre, [(40.0, 0.0, 0.0)])
+
+    # Attitude ADI helpers: level, nose-up shifts horizon down, roll/pitch from q.
+    r0, p0, y0 = rpy_from_q(LEVEL)
+    assert abs(r0) < 1e-9 and abs(p0) < 1e-9 and abs(y0) < 1e-9
+    assert abs(rpy_from_q(pitch_q(math.radians(20)))[1] - math.radians(20)) < 1e-6
+    assert abs(rpy_from_q(roll_q(math.radians(-15)))[0] + math.radians(15)) < 1e-6
+    assert attitude_horizon_shift(0.0) == 0.0
+    assert abs(attitude_horizon_shift(math.radians(ATT_PITCH_FULL_DEG)) - float(ATT_RADIUS)) < 1e-9
+    assert attitude_horizon_shift(math.radians(-10.0)) < 0.0
     test_map_raster()
     test_map_status_lines()
     print("hud overlay ok")

@@ -93,14 +93,17 @@ DRAG_LIN = (1.2, 4.0, 4.0)                  # N per m/s, body x y z
 DRAG_QUAD = (3.0, 35.0, 35.0)               # N per (m/s)^2
 INERTIA_YZ = 0.179                          # kg m^2 about the pitch / yaw axes
 
-# Gains. Attitude loop about 4 rad/s, position loop well below it.
+# Gains. Pitch ~4 rad/s; yaw faster so heading steers onto the force without
+# crabbing (fish-swim). Position loop stays well below attitude.
 ATT_WN = 4.0
+ATT_WN_YAW = 6.5
 KP_PITCH = INERTIA_YZ * ATT_WN ** 2 / PITCH_NM_PER_UNIT
 KD_PITCH = 2.0 * INERTIA_YZ * ATT_WN / PITCH_NM_PER_UNIT
-KP_YAW = INERTIA_YZ * ATT_WN ** 2 / YAW_NM_PER_UNIT
-KD_YAW = 2.0 * INERTIA_YZ * ATT_WN / YAW_NM_PER_UNIT
+KP_YAW = INERTIA_YZ * ATT_WN_YAW ** 2 / YAW_NM_PER_UNIT
+KD_YAW = 2.0 * INERTIA_YZ * ATT_WN_YAW / YAW_NM_PER_UNIT
 GRAVITY_FF = MASS_KG * 9.81 * CG_BELOW_M / PITCH_NM_PER_UNIT
-TORQUE_MAX = 0.4                            # normalized pitch / yaw command limit
+TORQUE_MAX = 0.4                            # normalized pitch command limit
+TORQUE_MAX_YAW = 0.65                       # yaw gets more rate authority
 KP_POS = 0.7                                # 1/s: position error -> velocity correction
 V_CORR_MAX = 0.4                            # m/s
 KV = 1.5                                    # 1/s: velocity error -> acceleration
@@ -111,8 +114,8 @@ I_DEPTH_BAND_M = 0.5                        # integrate only this close to the d
 # the horizontal force is too small to give one. Force behind the nose backs
 # the hull up unless it is large, then the hull turns round.
 PITCH_MAX_RAD = math.radians(float(os.environ.get("UDRONE_PITCH_MAX_DEG", "") or 45.0))
-HEAD_MIN_N = 2.0
-HEAD_TURN_N = 8.0
+HEAD_MIN_N = 1.5
+HEAD_TURN_N = 5.5
 HEAD_BEHIND_RAD = math.radians(120.0)
 ELEV_KEEP = math.tan(math.radians(25.0))   # force this close to vertical keeps the pitch side
 # Progress gate: the reference slows as the hull falls behind and stops at GATE_E1.
@@ -541,6 +544,8 @@ class UdroneHelixController(Node):
         # slower and smoother; 1.0 is the historical full-authority loop.
         self.power = _mp.from_env()
         self._err_n = 0.0
+        self._last_thrust = 0.0   # along-hull thrust from the last control tick
+        self._last_herr = 0.0     # horizontal path error (m)
         self.keep_armed = os.environ.get("UDRONE_KEEP_ARMED", "") == "1"
         self.offers_baton = False    # the hold runner owns the baton while it flies
         self.baton_only = False      # the hold runner never arms; it only takes over
@@ -1018,6 +1023,8 @@ class UdroneHelixController(Node):
         fn = norm(force)
         # Throttle ceiling is the maneuver power (1.0 = full SURGE_N_PER_UNIT).
         thrust = clamp(dot(force, fwd) / SURGE_N_PER_UNIT, self.power)
+        self._last_thrust = float(thrust)
+        self._last_herr = math.hypot(err[0], err[1])
         roll_u = pitch_u = yaw_u = 0.0
         if not docked:
             self._dir = self._hull_dir(force, fwd, fn)
@@ -1027,10 +1034,11 @@ class UdroneHelixController(Node):
             if dot(fwd, self._dir) < 0.0:       # more than 90 deg off: full error
                 rn = norm(rot)
                 rot = tuple(r / rn for r in rot) if rn > 1e-6 else left
-            tq = TORQUE_MAX * gs
+            tq_p = TORQUE_MAX * gs
+            tq_y = TORQUE_MAX_YAW * gs
             pitch_u = clamp(
-                KP_PITCH * gs * dot(rot, left) - KD_PITCH * self.w_body[1] - GRAVITY_FF * fwd[2], tq)
-            yaw_u = clamp(KP_YAW * gs * dot(rot, up) - KD_YAW * self.w_body[2], tq)
+                KP_PITCH * gs * dot(rot, left) - KD_PITCH * self.w_body[1] - GRAVITY_FF * fwd[2], tq_p)
+            yaw_u = clamp(KP_YAW * gs * dot(rot, up) - KD_YAW * self.w_body[2], tq_y)
 
         # Log in the path frame.
         roll, pitch, yaw = rpy_from_q(q)

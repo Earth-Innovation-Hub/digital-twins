@@ -10,7 +10,7 @@ import math
 TAG_Z_BOAT = 0.254   # deck tag, metres above the Heron origin
 CAM_Z = 0.13         # upward camera, metres above the xudrone origin
 STANDOFF_M = 1.0     # camera-to-tag range to hold
-TAG_ID = 10
+TAG_ID = 10          # underside deck tag (up-cam track / nest / search)
 FACE_M = 1.5         # inside this the nose keeps the boat's heading
 STATION_PITCH_RAD = math.radians(20.0)   # keeps the deck tag in the up camera
 

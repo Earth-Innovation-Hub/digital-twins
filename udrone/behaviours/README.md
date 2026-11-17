@@ -8,9 +8,10 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | (in-process) | `dock`, `goto`, `survey`, `hold`, `abort` | boat + latch |
 | `run_helix.py` | `helix` | AUV forward helix |
 | `run_swim.py` | `swim` | AUV straight leg (compass, world, or along heading) |
-| `run_hoop.py` | `hoop` | Front-camera search, then one join onto the centerline through the orange ring |
+| `run_hoop.py` | `hoop` | Front-camera search → approach/commit glide corridor → hoop-axis CEM tube (`hoop_mpc.py`); reacquire corridor on through fail |
 | `run_track_otter.py` | `track` | Hold under otter_k on deck tag 10 (`track_geom.py`) |
-| `run_rendezvous.py` | `rendezvous` | Nest-axis spiral → tag 10 → servo onto boat −Z → latch (`rendezvous_geom.py`) |
+| `run_search_otter.py` | `search_otter` | Aft station → expanding sine → under nest → lock deck tag 10 (up-cam); no latch; chain with `rendezvous` |
+| `run_rendezvous.py` | `rendezvous` | Nest-axis approach → deck tag 10 up-cam servo → latch (`rendezvous_geom.py`) |
 | `run_shape.py` | `shape` | Infinity / orbit / vertical loop (`shape_geom.py`) |
 | `run_coverage.py` | `coverage` | AUV 3D lawnmower (`patterns.volume_lawnmower`) |
 | `run_approach_tag.py` | `approach_tag` | Expanding spiral search → front-cam IBVS rates |
@@ -21,11 +22,12 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | `coverage_plan.py` | (used by mapper / `coverage --plan map`) | Map-aware boustrophedon over costmap gaps |
 
 Helix, swim, hoop, track, and coverage share `UdroneHelixController` (force → point-hull-axis).
-`swim` is one polyline leg. `hoop` (`hoop_geom.py`) covers a 2 m dock-centred
-grid until the front camera's orange pixels form a ring, then flies one Hermite
-join onto the centerline. Once three centre fixes agree, that line is kept.
-A pass needs the ring around the optical axis and the hull inside the opening
-at ENU (6, 0, −1). Pitch from `rpy_from_q` is positive nose-down.
+`swim` is one polyline leg. `hoop` (`hoop_geom.py` + `hoop_mpc.py`) covers a
+dock-centred grid until the front camera's orange pixels form a ring, then
+yaw-holds the ring axis and flies a receding tube through the opening. Once
+three centre fixes agree, that centre is kept. A pass needs the ring around
+the optical axis and the hull inside the opening at ENU (6, 0, −4.626). Pitch
+from `rpy_from_q` is positive nose-down.
 Every runner on `UdroneHelixController` publishes one HUD image,
 `/xudrone/hud/image` (latest frame also at `/tmp/xudrone_hud.jpg`, once a
 second; `UDRONE_HUD=0` turns it off). `hud_overlay.py` draws the task's camera
@@ -36,8 +38,9 @@ camera also gets the horizon, the commanded hull direction, and the command arro
 Around the edges sit a telemetry panel, the other two cameras, and a north-up
 map that carries the bed depth and obstacles from `xudrone_mapper` (see the pack
 [README](../README.md#mapping)). A runner adds its own layer with `_hud_layers()`: the hoop adds the ring
-box, planned path, end, and fix; the rendezvous adds the nest-axis acceptance
-cone, nest, lateral/tilt, and dock state. Geometry is in `rendezvous_geom`
+box, planned path, end, and fix; the rendezvous adds an ILS-style glide path
+(`glide_path`: aft→under funnel + nest-axis dock rails/cone), nest, lateral/tilt,
+and dock state (front cam on aft/commit, up cam on servo/dock). Geometry is in `rendezvous_geom`
 (nest between pontoons, approach along boat −Z, plates parallel). `track`
 holds the upward camera about 1 m under AprilTag 10 on the
 Heron deck. The method is Harish Anand's ASU thesis
@@ -55,4 +58,5 @@ Downward EchoRanger also feeds PX4 `distance_sensor` via GZBridge
 LLM path (tesseract): `coral_bridge` + `coral_instructions` map operator /
 `instruction` text onto these commands (e.g. “short survey until tag, then go to
 the tag”, `xudrone: track otter_k`, or “undock, search for and approach tag and
-when complete, rendezvous with otter_k” → detach → `approach_tag` → `rendezvous`).
+when complete, rendezvous with otter_k” → detach → `rendezvous`; “search for otter_k
+then rendezvous” → `search_otter` → `rendezvous`).

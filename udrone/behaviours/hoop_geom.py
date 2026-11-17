@@ -16,7 +16,7 @@ HOOP_RADIUS = 0.50              # 1 m diameter, tube centreline
 RING_OUTER_M = 1.09             # outer diameter: 1.0 m plus the 0.045 m tube
 INNER_PASS_M = 0.40             # inside the opening, clear of the tube
 CAM_FORWARD_M = 0.185           # front camera, metres ahead of the hull origin
-SIDEWAYS_M = 0.50               # baseline before a ring fix may confirm itself
+SIDEWAYS_M = 0.28               # baseline before a ring fix may confirm itself
 STABLE_M = 4.0                  # inside this range the final is frozen
 LOCALIZER_MPS = 0.08            # how fast that trim may slide the line
 LOCALIZER_GAIN = 0.35           # fraction of the image error taken while still far
@@ -361,10 +361,11 @@ def orange_ring(bgr):
         minor = min(w, h)
         if major < 18.0 or area < 40.0 or minor < 2.0:
             continue
-        # A blob cut by the frame edge is a sliver of the bed or a pontoon,
-        # and its size is not the ring diameter.
+        # A blob cut by the frame edge is often bed/pontoon clutter. Near the
+        # ring the ellipse fills the frame and clips too — keep large clipped
+        # blobs (was 160; that dropped FOV ~2–4 m out and aborted through).
         clipped = x <= 1.0 or y <= 1.0 or x + w >= width - 1.0 or y + h >= height - 1.0
-        if clipped and major < 160.0:
+        if clipped and major < 90.0:
             continue
         ell_area = math.pi * (major / 2.0) * (minor / 2.0)
         filled = area / max(ell_area, 1.0)
@@ -442,6 +443,261 @@ PASS_TOP = -0.5
 def pass_depth(z: float) -> float:
     """Depth to fly through a ring seen at z, kept off the surface and the floor."""
     return min(PASS_TOP, max(HOOP_FLOOR + 0.5, float(z)))
+
+
+# ---------------------------------------------------------------------------
+# Approach corridor (rendezvous-style): station → gate → through → exit.
+# Wide at the approach station, narrow at the gate; HUD draws the funnel.
+# ---------------------------------------------------------------------------
+APPROACH_STANDOFF_M = 3.5
+GATE_STANDOFF_M = 1.20
+EXIT_STANDOFF_M = 2.0
+APPROACH_ARRIVE_M = 0.70
+GATE_ARRIVE_M = 0.50
+CORRIDOR_HALF_APPROACH_M = 1.20
+CORRIDOR_HALF_GATE_M = 0.32
+GLIDE_GATE_FRACS = (0.0, 0.33, 0.66, 1.0)
+
+
+def _unit_xy(axis):
+    ax, ay = float(axis[0]), float(axis[1])
+    n = math.hypot(ax, ay)
+    if n < 1e-9:
+        return (1.0, 0.0, 0.0)
+    return (ax / n, ay / n, 0.0)
+
+
+def _left_xy(fwd):
+    return (-float(fwd[1]), float(fwd[0]), 0.0)
+
+
+def approach_side_sign(vehicle, center, axis=HOOP_AXIS) -> float:
+    """+1 if the vehicle sits on the +axis side of the ring, else -1."""
+    fwd = _unit_xy(axis)
+    along = (
+        (float(vehicle[0]) - float(center[0])) * fwd[0]
+        + (float(vehicle[1]) - float(center[1])) * fwd[1]
+    )
+    return 1.0 if along >= 0.0 else -1.0
+
+
+def through_dir(vehicle, center, axis=HOOP_AXIS):
+    """Unit horizontal direction from the approach side through the opening."""
+    fwd = _unit_xy(axis)
+    side = approach_side_sign(vehicle, center, axis)
+    # Station is on the vehicle's side; fly toward the opposite side.
+    return (-side * fwd[0], -side * fwd[1], 0.0)
+
+
+def approach_station(center, axis, vehicle, standoff_m: float = APPROACH_STANDOFF_M):
+    """Centreline hold on the vehicle's side of the ring (like the aft station)."""
+    fwd = _unit_xy(axis)
+    side = approach_side_sign(vehicle, center, axis)
+    z = pass_depth(center[2])
+    stand = float(standoff_m)
+    return (
+        float(center[0]) + side * stand * fwd[0],
+        float(center[1]) + side * stand * fwd[1],
+        z,
+    )
+
+
+def gate_station(center, through, standoff_m: float = GATE_STANDOFF_M):
+    """Threshold short of the opening on the approach centreline."""
+    th = _unit_xy(through)
+    z = pass_depth(center[2])
+    stand = float(standoff_m)
+    return (
+        float(center[0]) - stand * th[0],
+        float(center[1]) - stand * th[1],
+        z,
+    )
+
+
+def exit_station(center, through, exit_m: float = EXIT_STANDOFF_M):
+    """Rollout past the opening on the through axis."""
+    th = _unit_xy(through)
+    z = pass_depth(center[2])
+    return (
+        float(center[0]) + float(exit_m) * th[0],
+        float(center[1]) + float(exit_m) * th[1],
+        z,
+    )
+
+
+def hoop_frame(pos, center, through):
+    """(s, y, z) with s along through (0 at opening; approach s < 0)."""
+    th = _unit_xy(through)
+    left = _left_xy(th)
+    v = (
+        float(pos[0]) - float(center[0]),
+        float(pos[1]) - float(center[1]),
+        float(pos[2]) - float(center[2]),
+    )
+    s = v[0] * th[0] + v[1] * th[1]
+    y = v[0] * left[0] + v[1] * left[1]
+    z = v[2]
+    return s, y, z, th, left
+
+
+def hoop_corridor(
+    auv_pos,
+    center,
+    axis=HOOP_AXIS,
+    prev_phase: str | None = None,
+    approach_m: float = APPROACH_STANDOFF_M,
+    gate_m: float = GATE_STANDOFF_M,
+    exit_m: float = EXIT_STANDOFF_M,
+    approach_arrive_m: float = APPROACH_ARRIVE_M,
+    gate_arrive_m: float = GATE_ARRIVE_M,
+    half_approach: float = CORRIDOR_HALF_APPROACH_M,
+    half_gate: float = CORRIDOR_HALF_GATE_M,
+):
+    """Progress along the hoop approach corridor (rendezvous analogue).
+
+    ``phase``:
+      - ``approach``: swim to the approach station
+      - ``commit``: fly the tapering funnel toward the gate
+      - ``through``: at the gate, on-axis enough to punch through
+    """
+    th = through_dir(auv_pos, center, axis)
+    appr = approach_station(center, axis, auv_pos, standoff_m=approach_m)
+    gate = gate_station(center, th, standoff_m=gate_m)
+    exit_pt = exit_station(center, th, exit_m=exit_m)
+    s, y, z, fwd, left = hoop_frame(auv_pos, center, th)
+    dist_appr = math.hypot(
+        float(auv_pos[0]) - appr[0], float(auv_pos[1]) - appr[1],
+    )
+    dist_gate = math.hypot(
+        float(auv_pos[0]) - gate[0], float(auv_pos[1]) - gate[1],
+    )
+    lat = math.hypot(y, z)
+    # Corridor half-width at this along-track (lerp approach→gate).
+    # s_appr ≈ -approach_m, s_gate ≈ -gate_m.
+    span = max(1e-3, float(approach_m) - float(gate_m))
+    t = max(0.0, min(1.0, (float(approach_m) + s) / span))
+    half = float(half_approach) + t * (float(half_gate) - float(half_approach))
+    in_funnel = lat <= half * 1.15 + 1e-9
+    prev = (prev_phase or "").lower()
+    sticky_commit = prev in ("commit", "through", "approach")
+    on_gate = dist_gate <= float(gate_arrive_m) and lat <= float(half_gate) * 1.25
+    if on_gate or (prev == "through" and s > -float(gate_m) - 0.4 and lat <= half_gate * 1.5):
+        phase = "through"
+    elif prev == "commit" and not (dist_appr > float(approach_m) + 1.5 and not in_funnel):
+        phase = "commit"
+    elif dist_appr <= float(approach_arrive_m) and in_funnel:
+        phase = "commit"
+    elif sticky_commit and s > -float(approach_m) - 0.5 and in_funnel:
+        phase = "commit"
+    else:
+        phase = "approach"
+    return {
+        "phase": phase,
+        "center": tuple(float(c) for c in center),
+        "approach": appr,
+        "gate": gate,
+        "exit": exit_pt,
+        "through": th,
+        "fwd": fwd,
+        "left": left,
+        "s": s,
+        "y": y,
+        "z": z,
+        "lat": lat,
+        "half_m": half,
+        "in_funnel": in_funnel,
+        "dist_approach": dist_appr,
+        "dist_gate": dist_gate,
+    }
+
+
+def _shift3(p, left, side: float, half_m: float):
+    w = float(side) * float(half_m)
+    return tuple(float(p[i]) + w * float(left[i]) for i in range(3))
+
+
+def _lerp3(a, b, t: float):
+    t = float(t)
+    return tuple(float(a[i]) + t * (float(b[i]) - float(a[i])) for i in range(3))
+
+
+def hoop_glide_path(
+    center,
+    axis=HOOP_AXIS,
+    vehicle=None,
+    approach_m: float = APPROACH_STANDOFF_M,
+    gate_m: float = GATE_STANDOFF_M,
+    exit_m: float = EXIT_STANDOFF_M,
+    half_approach: float = CORRIDOR_HALF_APPROACH_M,
+    half_gate: float = CORRIDOR_HALF_GATE_M,
+    in_funnel: bool = False,
+    through_ok: bool = False,
+):
+    """HUD funnel for the hoop corridor (ILS-style rails + range gates)."""
+    veh = vehicle if vehicle is not None else (
+        float(center[0]) - float(approach_m), float(center[1]), float(center[2]),
+    )
+    th = through_dir(veh, center, axis)
+    left = _left_xy(th)
+    appr = approach_station(center, axis, veh, standoff_m=approach_m)
+    gate = gate_station(center, th, standoff_m=gate_m)
+    exit_pt = exit_station(center, th, exit_m=exit_m)
+    opening = (float(center[0]), float(center[1]), pass_depth(center[2]))
+
+    ap_l = _shift3(appr, left, 1.0, half_approach)
+    ap_r = _shift3(appr, left, -1.0, half_approach)
+    gt_l = _shift3(gate, left, 1.0, half_gate)
+    gt_r = _shift3(gate, left, -1.0, half_gate)
+    ex_l = _shift3(exit_pt, left, 1.0, half_gate)
+    ex_r = _shift3(exit_pt, left, -1.0, half_gate)
+
+    approach = (0, 180, 80)
+    tube = (255, 255, 255) if through_ok else ((0, 220, 0) if in_funnel else (0, 200, 255))
+    paths = [
+        {
+            "pts": [ap_l, gt_l, gt_r, ap_r],
+            "color": approach,
+            "width": 1,
+            "closed": True,
+            "fill": True,
+            "fill_alpha": 0.22,
+            "label": "",
+        },
+        {"pts": [ap_l, gt_l], "color": approach, "width": 2, "label": ""},
+        {"pts": [ap_r, gt_r], "color": approach, "width": 2, "label": ""},
+        {"pts": [appr, gate], "color": approach, "width": 2, "label": "approach"},
+        {"pts": [gate, opening, exit_pt], "color": tube, "width": 2, "label": "through"},
+        {"pts": [gt_l, ex_l], "color": tube, "width": 1, "label": ""},
+        {"pts": [gt_r, ex_r], "color": tube, "width": 1, "label": ""},
+    ]
+    for t in GLIDE_GATE_FRACS:
+        c = _lerp3(appr, gate, t)
+        w = float(half_approach) + t * (float(half_gate) - float(half_approach))
+        paths.append({
+            "pts": [_shift3(c, left, 1.0, w), _shift3(c, left, -1.0, w)],
+            "color": approach,
+            "width": 1,
+            "label": (
+                "" if t not in (0.0, 1.0)
+                else (f"{(1.0 - t) * approach_m:.0f}m" if t < 1.0 else "gate")
+            ),
+        })
+    markers = [
+        {"pos": appr, "label": "approach", "color": approach, "shape": "diamond"},
+        {"pos": gate, "label": "gate", "color": approach, "shape": "circle"},
+        {"pos": opening, "label": "opening", "color": tube, "shape": "circle"},
+        {"pos": exit_pt, "label": "exit", "color": tube, "shape": "diamond"},
+    ]
+    return {
+        "paths": paths,
+        "markers": markers,
+        "approach": appr,
+        "gate": gate,
+        "exit": exit_pt,
+        "opening": opening,
+        "through": th,
+        "left": left,
+    }
 
 
 def _wrap_pi(angle: float) -> float:

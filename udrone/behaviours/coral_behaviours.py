@@ -36,11 +36,15 @@ Commands:
       Hold under otter_k: the upward camera watches AprilTag 10 on the
       underside of the deck, and the force loop keeps a metre below it.
       Rejected while the latch is attached. Phrase: xudrone: track otter_k.
+  {"type":"search_otter","power_pct"?, "id"?}
+      Aft corridor under otter_k and lock deck tag 10 — does not latch.
+      Chain with rendezvous to climb and ATTACH. Phrase: search for otter_k.
   {"type":"rendezvous","power_pct"?, "id"?}
       Search under otter_k with the upward camera, servo onto AprilTag 10
       on the deck, and latch into the nest. Phrase: xudrone: rendezvous with otter-k.
       power_pct (5–100) sets thrust authority and reference pace (smoother when lower).
       If the latch is already attached, the behaviour reports landed.
+      After search_otter, warm-starts under the nest (skips aft).
   {"type":"coverage","width_m"?, "length_m"?, "swath_m"?, "layers"?,
    "z_top"?, "z_bottom"?, "speed_mps"?, "heading_deg"?,
    "center_east_m"?, "center_north_m"?, "until"?: "tag_detected",
@@ -57,7 +61,8 @@ Commands:
 
 Events:
   {"type":"accepted"|"rejected"|"failed"|"arrived"|"survey_done"|"dock_done"|
-   "helix_done"|"swim_done"|"hoop_done"|"track_done"|"rendezvous_done"|"coverage_done"|"aborted", "id", ...}
+   "helix_done"|"swim_done"|"hoop_done"|"track_done"|"search_otter_done"|
+   "rendezvous_done"|"coverage_done"|"aborted", "id", ...}
 
 Status (1 Hz): busy, phase, latch, boat/auv pose, active_id, last_event.
 
@@ -353,6 +358,8 @@ class CoralBehaviours(Node):
             self._start_hoop(cmd)
         elif kind == "track":
             self._start_track(cmd)
+        elif kind == "search_otter":
+            self._start_search_otter(cmd)
         elif kind == "rendezvous":
             self._start_rendezvous(cmd)
         elif kind == "coverage":
@@ -1011,6 +1018,31 @@ class CoralBehaviours(Node):
             env["UDRONE_TRACK_STANDOFF"] = str(float(cmd["standoff_m"]))
         self._spawn_auv("track", cmd["id"], runner, env, {}, "/tmp/coral_track.log", cmd=cmd)
 
+    def _start_search_otter(self, cmd):
+        runner = os.environ.get(
+            "UDRONE_SEARCH_OTTER_RUNNER",
+            "/root/udrone_boat/behaviours/run_search_otter.py",
+        )
+        if not os.path.isfile(runner):
+            here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run_search_otter.py")
+            if not os.path.isfile(here):
+                self._emit({"type": "rejected", "id": cmd["id"],
+                            "reason": f"search_otter runner not found ({runner})"})
+                return
+            runner = here
+        env = {
+            **os.environ,
+            "GZ_PARTITION": os.environ.get("GZ_PARTITION", "aquatic"),
+            "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "84"),
+            "UDRONE_GZ_MODEL": self.auv_model,
+            "UDRONE_PX4_INSTANCE": str(self.auv_px4),
+            "UDRONE_HELIX_BEHAVIOUR": "1",
+        }
+        self._spawn_auv(
+            "search_otter", cmd["id"], runner, env, {},
+            "/tmp/coral_search_otter.log", cmd=cmd,
+        )
+
     def _start_rendezvous(self, cmd):
         runner = os.environ.get(
             "UDRONE_RENDEZVOUS_RUNNER",
@@ -1295,7 +1327,10 @@ class CoralBehaviours(Node):
             self._tick_dock()
         elif self.phase in ("goto", "survey"):
             self._tick_goto()
-        elif self.phase in ("helix", "swim", "hoop", "track", "rendezvous", "coverage", "approach", "shape"):
+        elif self.phase in (
+            "helix", "swim", "hoop", "track", "search_otter",
+            "rendezvous", "coverage", "approach", "shape",
+        ):
             self._tick_auv()
 
     def destroy_node(self):

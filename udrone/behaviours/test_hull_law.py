@@ -41,10 +41,17 @@ s = state()
 d = hull_dir(s, (0.0, 0.0, -5.0), LEVEL_EAST, 5.0)
 assert abs(elev(d) + 45.0) < 1e-6 and abs(heading(d)) < 1e-9, d
 
-# A small sideways force does not swing the nose round.
+# A small sideways force under HEAD_MIN_N does not swing the nose round.
 s = state(head=0.0)
 d = hull_dir(s, (0.0, 1.0, -0.5), LEVEL_EAST, 1.2)
 assert abs(heading(d)) < 1e-9, d
+# Above HEAD_MIN_N the nose steers onto the force (zippy yaw).
+s = state(head=0.0)
+d = hull_dir(s, (0.0, 2.5, -0.5), LEVEL_EAST, 2.6)
+assert abs(abs(heading(d)) - math.pi / 2) < 1e-6, d
+
+# Controller exposes last thrust / horizontal error for stuck-steer.
+assert hasattr(c.UdroneHelixController, "_control")
 
 # A modest force behind the nose backs up: the heading stays, the nose pitches
 # so that reverse thrust also pushes the right way vertically.

@@ -60,6 +60,7 @@ install)
   mkdir -p $Hdir/meshes $Hdir/materials/textures
   cp -a $N/tag_plane.obj $Hdir/meshes/tag_plane.obj
   cp -a $N/apriltag36h11_10.png $Hdir/materials/textures/apriltag36h11_10.png
+  rm -f $Hdir/materials/textures/apriltag36h11_11.png
   cp -a $N/kiwanis_lake.sdf $W
   rm -rf $Kdir
   cp -a $N/kiwanis_lake $Kdir

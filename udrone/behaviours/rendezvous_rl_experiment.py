@@ -26,12 +26,14 @@ from rendezvous_geom import (
     LEARNED_CHASE_MPS,
     LEARNED_CLOSE_RATE,
     SEARCH_DEPTH_M,
+    SERVO_LOCK_CAP_M,
+    axes,
     closing_range,
     cone_state,
     dock_goal,
     nest_world,
     pull_to_nest_axis,
-    search_offset,
+    under_loiter_point,
     under_nest,
 )
 
@@ -183,7 +185,7 @@ def rollout(params, scenario):
         if stage == "search":
             if see:
                 lock_range = math.hypot(auv[0] - tag[0], auv[1] - tag[1]) + abs(auv[2] - tag[2])
-                lock_range = max(0.4, min(3.5, lock_range))
+                lock_range = max(LAND_RANGE_M, min(SERVO_LOCK_CAP_M, lock_range))
                 lock_tm = t
                 stage = "servo"
             else:
@@ -191,8 +193,11 @@ def rollout(params, scenario):
                 if far:
                     goal = station
                 else:
-                    de, dn, _r = search_offset(t - search_t0, r_rate=0.12 * power, omega=0.40 * power)
-                    goal = (nest[0] + de, nest[1] + dn, station[2])
+                    fwd, left, _up = axes(bq)
+                    goal = under_loiter_point(
+                        nest, station[2], fwd, left, t - search_t0,
+                        r_rate=0.12 * power, omega=0.40 * power,
+                    )
                 goal = _lead_point(goal, bq, lead_m if (bve or bvn) else 0.0)
         if stage == "servo":
             optical = closing_range(lock_range, t - lock_tm, LAND_RANGE_M, rate=close_rate)

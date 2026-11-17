@@ -56,6 +56,7 @@ TASKS = {
     "UdroneCoverageController": ("coverage", "front"),
     "UdroneHoopController": ("hoop", "front"),
     "UdroneTrackOtter": ("track otter_k", "up"),
+    "UdroneSearchOtter": ("search otter_k", "up"),
     "UdroneRendezvous": ("rendezvous + dock", "up"),
     "UdroneApproachController": ("approach tag", "front"),
     "UdroneHold": ("hold", "front"),
@@ -80,6 +81,11 @@ WHITE = (255, 255, 255)
 RED = (60, 60, 255)
 YELLOW = (0, 255, 255)
 GREY = (150, 150, 150)
+# Aviation attitude ball (BGR): sky / ground.
+ATT_SKY = (210, 150, 55)
+ATT_GND = (45, 105, 155)
+ATT_RADIUS = 62          # px; sits on the 170 px map
+ATT_PITCH_FULL_DEG = 45.0  # ±this fills the ball
 
 
 def body_axes(q):
@@ -90,6 +96,21 @@ def body_axes(q):
         (2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)),
         (2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)),
     )
+
+
+def rpy_from_q(q):
+    """Roll, pitch, yaw (ZYX, radians) from quaternion (w, x, y, z)."""
+    w, x, y, z = (float(v) for v in q[:4])
+    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+    pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
+    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    return roll, pitch, yaw
+
+
+def attitude_horizon_shift(pitch_rad, radius: int = ATT_RADIUS,
+                           full_deg: float = ATT_PITCH_FULL_DEG) -> float:
+    """Pixels to shift the horizon: nose-up moves the horizon down (aviation ADI)."""
+    return math.degrees(float(pitch_rad)) * (float(radius) / max(1.0, float(full_deg)))
 
 
 def default_intrinsics(camera: str, width: int = WIDTH, height: int = HEIGHT):
@@ -378,17 +399,34 @@ class TaskHud:
             cv2.line(img, clip(a), clip(b), (120, 200, 120), 1, cv2.LINE_AA)
 
     def _draw_path(self, img, path, proj, clip):
-        cv2 = self._cv2
+        cv2, np = self._cv2, self._np
         color = path.get("color", MAGENTA)
         width = int(path.get("width", 1))
-        prev = None
-        last = None
+        pixs = []
         for p in path.get("pts", []):
             pix = proj(p)
-            if pix is not None and prev is not None:
-                cv2.line(img, clip(prev), clip(pix), color, width, cv2.LINE_AA)
-            prev = pix
-            last = pix if pix is not None else last
+            pixs.append(clip(pix) if pix is not None else None)
+        # Filled corridor / cone slabs (airport glide-path look).
+        if path.get("fill") and path.get("closed"):
+            poly = [p for p in pixs if p is not None]
+            if len(poly) >= 3:
+                overlay = img.copy()
+                cv2.fillPoly(overlay, [np.array(poly, np.int32)], color, cv2.LINE_AA)
+                alpha = float(path.get("fill_alpha", 0.25))
+                cv2.addWeighted(overlay, alpha, img, 1.0 - alpha, 0, img)
+                cv2.polylines(img, [np.array(poly, np.int32)], True, color, max(1, width), cv2.LINE_AA)
+        else:
+            prev = None
+            for pix in pixs:
+                if pix is not None and prev is not None:
+                    cv2.line(img, prev, pix, color, width, cv2.LINE_AA)
+                prev = pix if pix is not None else prev
+            if path.get("closed"):
+                first = next((p for p in pixs if p is not None), None)
+                last = next((p for p in reversed(pixs) if p is not None), None)
+                if first is not None and last is not None and first != last:
+                    cv2.line(img, last, first, color, width, cv2.LINE_AA)
+        last = next((p for p in reversed(pixs) if p is not None), None)
         if path.get("label") and last is not None:
             cv2.putText(img, path["label"], clip((last[0] + 6, last[1] - 6)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
@@ -571,8 +609,18 @@ class TaskHud:
             cv2.polylines(img, [np.array(chain, np.int32)], False, MAGENTA, 1, cv2.LINE_AA)
         for path in layers.get("paths", []):
             chain = [mp(p) for p in path.get("pts", [])]
-            if len(chain) >= 2:
-                cv2.polylines(img, [np.array(chain, np.int32)], False, path.get("color", MAGENTA), 1, cv2.LINE_AA)
+            if len(chain) < 2:
+                continue
+            closed = bool(path.get("closed"))
+            if path.get("fill") and closed and len(chain) >= 3:
+                overlay = img.copy()
+                cv2.fillPoly(overlay, [np.array(chain, np.int32)], path.get("color", MAGENTA))
+                alpha = float(path.get("fill_alpha", 0.25))
+                cv2.addWeighted(overlay, alpha, img, 1.0 - alpha, 0, img)
+            cv2.polylines(
+                img, [np.array(chain, np.int32)], closed,
+                path.get("color", MAGENTA), 1, cv2.LINE_AA,
+            )
         cone = layers.get("cone")
         if cone is not None:
             r = int(cone["radius"] * scale)
@@ -598,13 +646,86 @@ class TaskHud:
             tri.append((int(x0 + c[0] + ex), int(y0 + c[1] - ny)))
         cv2.fillPoly(img, [np.array(tri, np.int32)], YELLOW)
         cv2.putText(img, "N", (x0 + px // 2 - 4, y0 + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, WHITE, 1, cv2.LINE_AA)
+        # Aviation attitude ball centred on the map (roll / pitch ADI).
+        self._draw_attitude(img, x0 + px // 2, y0 + px // 2, ATT_RADIUS, q)
+
+    def _draw_attitude(self, img, cx, cy, radius, q):
+        """Circular roll/pitch attitude indicator (aviation ADI) over the map."""
+        cv2, np = self._cv2, self._np
+        roll, pitch, _yaw = rpy_from_q(q)
+        r = int(radius)
+        d = 2 * r + 4
+        mid = d // 2
+        tile = np.zeros((d, d, 3), np.uint8)
+        shift = attitude_horizon_shift(pitch, r)
+        hy = int(round(mid + shift))
+        tile[: max(0, min(d, hy)), :] = ATT_SKY
+        tile[max(0, min(d, hy)) :, :] = ATT_GND
+        # Pitch ladder (before bank rotate): ±10° / ±20° bars.
+        px_per_deg = float(r) / ATT_PITCH_FULL_DEG
+        for deg in (-20, -10, 10, 20):
+            y = int(round(mid + shift - deg * px_per_deg))
+            if 2 <= y < d - 2:
+                half = 18 if abs(deg) == 10 else 12
+                cv2.line(tile, (mid - half, y), (mid + half, y), WHITE, 1, cv2.LINE_AA)
+                cv2.putText(tile, f"{abs(deg)}", (mid + half + 2, y + 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.28, WHITE, 1, cv2.LINE_AA)
+        # Bank: rotate sky/ground with roll (instrument view).
+        M = cv2.getRotationMatrix2D((mid, mid), -math.degrees(roll), 1.0)
+        tile = cv2.warpAffine(
+            tile, M, (d, d), flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=(28, 28, 28),
+        )
+        mask = np.zeros((d, d), np.uint8)
+        cv2.circle(mask, (mid, mid), r, 255, -1)
+        x0, y0 = int(cx) - mid, int(cy) - mid
+        h, w = img.shape[:2]
+        x1, y1 = max(0, x0), max(0, y0)
+        x2, y2 = min(w, x0 + d), min(h, y0 + d)
+        if x2 <= x1 or y2 <= y1:
+            return
+        tx1, ty1 = x1 - x0, y1 - y0
+        tx2, ty2 = tx1 + (x2 - x1), ty1 + (y2 - y1)
+        roi = img[y1:y2, x1:x2]
+        src = tile[ty1:ty2, tx1:tx2]
+        m = mask[ty1:ty2, tx1:tx2] > 0
+        roi[m] = src[m]
+        # Bezel + roll ticks (fixed); sky pointer at top.
+        cx_i, cy_i = int(cx), int(cy)
+        cv2.circle(img, (cx_i, cy_i), r, WHITE, 1, cv2.LINE_AA)
+        for deg in range(-60, 61, 30):
+            a = math.radians(deg - 90.0)  # 0° bank at top
+            c0, s0 = math.cos(a), math.sin(a)
+            inner, outer = r - (8 if deg % 60 == 0 else 5), r
+            cv2.line(
+                img,
+                (int(cx + inner * c0), int(cy + inner * s0)),
+                (int(cx + outer * c0), int(cy + outer * s0)),
+                WHITE, 1, cv2.LINE_AA,
+            )
+        top = (cx_i, cy_i - r + 1)
+        cv2.fillPoly(
+            img,
+            [np.array([(top[0], top[1] + 7), (top[0] - 5, top[1] - 1), (top[0] + 5, top[1] - 1)], np.int32)],
+            YELLOW,
+        )
+        # Fixed wing / waterline symbol.
+        cv2.line(img, (cx_i - r // 2, cy_i), (cx_i - 7, cy_i), YELLOW, 2, cv2.LINE_AA)
+        cv2.line(img, (cx_i + 7, cy_i), (cx_i + r // 2, cy_i), YELLOW, 2, cv2.LINE_AA)
+        cv2.circle(img, (cx_i, cy_i), 3, YELLOW, 1, cv2.LINE_AA)
+        cv2.putText(
+            img,
+            f"R{math.degrees(roll):+.0f} P{math.degrees(pitch):+.0f}",
+            (cx_i - r + 4, cy_i + r - 6),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.32, WHITE, 1, cv2.LINE_AA,
+        )
 
     def _draw_footer(self, img, cmd, q):
         thrust, _roll, pitch_u, yaw_u = cmd
-        fwd = body_axes(q)[0]
-        pitch = math.degrees(math.asin(max(-1.0, min(1.0, fwd[2]))))
-        heading = (90.0 - math.degrees(math.atan2(fwd[1], fwd[0]))) % 360.0
-        line = (f"hdg {heading:03.0f}  pitch {pitch:+.0f}  "
+        roll, pitch, yaw = rpy_from_q(q)
+        heading = (90.0 - math.degrees(yaw)) % 360.0
+        line = (f"hdg {heading:03.0f}  roll {math.degrees(roll):+.0f}  "
+                f"pitch {math.degrees(pitch):+.0f}  "
                 f"thrust {thrust:+.2f}  pitch_u {pitch_u:+.2f}  yaw_u {yaw_u:+.2f}")
         self._text(img, [line], 8, img.shape[0] - 10, YELLOW, 0.46)
 
