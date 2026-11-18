@@ -13,6 +13,9 @@ from hoop_geom import (
     gate_station,
     hoop_corridor,
     hoop_glide_path,
+    hoop_pass,
+    plane_sample,
+    punch_centered,
     through_dir,
 )
 
@@ -30,6 +33,27 @@ def main():
     assert abs(gt[0] - (c[0] - GATE_STANDOFF_M)) < 1e-6
     ex = exit_station(c, th)
     assert ex[0] > c[0]
+    # Frozen open-loop exit = centre + EXIT_STANDOFF_M * through (unit xy).
+    from hoop_geom import EXIT_STANDOFF_M
+    frozen = (
+        c[0] + EXIT_STANDOFF_M * th[0],
+        c[1] + EXIT_STANDOFF_M * th[1],
+        ex[2],
+    )
+    assert math.dist(ex, frozen) < 1e-6, (ex, frozen)
+
+    # Last-metre early-punch geometry: ~1.2 m short of gate, on-axis → still
+    # commit in hoop_corridor; run_hoop latches through only when lat/depth ready.
+    early = (gt[0] - 1.2 * th[0], gt[1] - 1.2 * th[1], gt[2])
+    early_c = hoop_corridor(early, c, HOOP_AXIS, prev_phase="commit")
+    assert early_c["phase"] == "commit", early_c
+    assert early_c["dist_gate"] <= 1.25, early_c
+    assert abs(early_c["lat"]) <= 0.28, early_c
+    # Deep / off-axis at the same range must stay outside the punch lat gate.
+    deep_off = (early[0], early[1] + 0.55, early[2] - 0.80)
+    deep_c = hoop_corridor(deep_off, c, HOOP_AXIS, prev_phase="commit")
+    assert deep_c["phase"] == "commit", deep_c
+    assert abs(deep_c["lat"]) > 0.28, deep_c
 
     far = hoop_corridor(west, c, HOOP_AXIS)
     assert far["phase"] == "approach", far
@@ -65,6 +89,19 @@ def main():
     assert th_e[0] < -0.9, th_e
     ap_e = approach_station(c, HOOP_AXIS, east)
     assert ap_e[0] > c[0]
+
+    # Punch gates are per axis. 0.20 m left used to pass a combined-lat check.
+    assert punch_centered(0.10, -0.10)
+    assert not punch_centered(0.20, 0.0)
+    assert not punch_centered(0.0, 0.20)
+    on_plane = plane_sample((6.0, 0.05, -4.60), c, HOOP_AXIS)
+    assert on_plane["radial"] < 0.40
+    assert hoop_pass(on_plane, 0.40)
+    assert not hoop_pass(on_plane, 1.2)
+    assert not hoop_pass(None, 0.2)
+    graze = dict(on_plane)
+    graze["radial"] = 0.55
+    assert not hoop_pass(graze, 0.2)
     print("hoop corridor ok")
 
 

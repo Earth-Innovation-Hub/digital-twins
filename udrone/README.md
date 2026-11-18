@@ -29,8 +29,9 @@ carries **AprilTag 36h11 id 0** (0.40 m) on **all six faces** so front, nadir, a
 side views can lock for survey stop and `approach_tag`. **AprilTag 36h11 id 10**
 (0.40 m) is centered on the underside of the Heron deck, facing down, for the
 upward camera. A **1 m vertical orange
-ring** (tube radius 0.045 m, 12 segments) sits at ENU (6, 0, −1), opening along
-east-west. It has no AprilTags; `hoop` finds it with the front camera.
+ring** (tube radius 0.045 m, 12 segments) sits at ENU (6, 0, −4.626), the
+midpoint of the water column, opening along east-west. It has no AprilTags;
+`hoop` finds it with the front camera.
 
 ![Kiwanis Lake CoRAL twin in Gazebo](docs/img/kiwanis_gazebo.png)
 
@@ -174,7 +175,7 @@ Commands:
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
 | `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
-| `hoop` | xudrone | front-camera search for the orange ring, then one smooth join onto the centerline through the opening. A pass needs the ring around the optical axis and the hull inside the opening at ENU (6, 0, −1). Rejected while latched. HUD: `/xudrone/hud/image` (every task) |
+| `hoop` | xudrone | Front-camera search, then a corridor to the gate. Inside 1.2 m the hull holds the gate with the nose free until the horizontal miss and the depth miss are each within 0.15 m, then surges at 0.6 m/s. A pass is one authored sample inside the opening (radial ≤ 0.40 m) and later arrival within 0.6 m of the frozen exit. `hoop_done` carries that verdict (`hoop_pass`, plane, exit miss). Rejected while latched. HUD: `/xudrone/hud/image` |
 | `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
 | `search_otter` | xudrone | Aft station → expanding sine until under the nest → lock deck tag 10 (up-cam) — no latch. Chain with `rendezvous`. Phrase `xudrone, search for otter_k` |
 | `rendezvous` | xudrone | Nest-axis dock under otter_k. Aft corridor → up-cam deck tag 10 servo on boat −Z → acceptance cone dock (MPC). Cone: 42° / 3.5 m, heading ≤40°, tilt ≤48°; ATTACH inside 0.55 m / 28° (LinkAttacher still 0.6 m / 30°). Optional `power_pct` (5–100). Phrase `xudrone, rendezvous and dock with otter_k` or `… with 50% power` |

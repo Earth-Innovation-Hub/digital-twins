@@ -414,13 +414,18 @@ class CoralBehaviours(Node):
         return True
 
     def _abort(self, cid, reason="abort"):
+        # Capture the active skill id before clear so waiters on swim_done/etc.
+        # see a terminal event (bridge also fails the multi-step plan).
+        was_id = self.active_id
+        was = self.phase
         self._kill_auv_proc()
         self._stop_holder()
         if self.phase == "goto" and self._boat_armed():
             self._boat_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM,
                                param1=0.0, param2=FORCE_ARM)
-        was = self.phase
         self._clear_job()
+        if was_id and was_id != cid:
+            self._emit({"type": "aborted", "id": was_id, "was": was, "reason": reason})
         self._emit({"type": "aborted", "id": cid, "was": was, "reason": reason})
 
     def _start_reset(self, cmd):
@@ -470,8 +475,11 @@ class CoralBehaviours(Node):
             self._abort(cid, reason="hold")
             return
         if baton_owner(self.auv_model) is not None:
+            # Operator hold must stop the inter-skill baton, not leave it armed.
+            self._stop_holder()
+            self._auv_disarm()
             self._emit({"type": "accepted", "id": cid, "command": "hold",
-                        "note": "xudrone is already holding station, armed"})
+                        "note": "stopped hold runner and disarmed"})
             return
         self._emit({"type": "accepted", "id": cid, "command": "hold", "note": "nothing to hold"})
 
@@ -791,6 +799,10 @@ class CoralBehaviours(Node):
 
     # ---- helix / coverage (AUV subprocess) ------------------------------
     def _start_helix(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "helix rejected: xudrone is latched; detach first"})
+            return
         duration = float(cmd.get("duration_s", os.environ.get("UDRONE_HELIX_DUR", "45")))
         radius = float(cmd.get("radius_m", os.environ.get("UDRONE_HELIX_R", "0.5")))
         omega = float(cmd.get("omega", os.environ.get("UDRONE_HELIX_OMEGA", "0.40")))
@@ -1019,6 +1031,10 @@ class CoralBehaviours(Node):
         self._spawn_auv("track", cmd["id"], runner, env, {}, "/tmp/coral_track.log", cmd=cmd)
 
     def _start_search_otter(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "search_otter rejected: xudrone is latched; detach first"})
+            return
         runner = os.environ.get(
             "UDRONE_SEARCH_OTTER_RUNNER",
             "/root/udrone_boat/behaviours/run_search_otter.py",
@@ -1066,6 +1082,10 @@ class CoralBehaviours(Node):
         self._spawn_auv("rendezvous", cmd["id"], runner, env, {}, "/tmp/coral_rendezvous.log", cmd=cmd)
 
     def _start_coverage(self, cmd):
+        if self.latch.state == "attached":
+            self._emit({"type": "rejected", "id": cmd["id"],
+                        "reason": "coverage rejected: xudrone is latched; detach first"})
+            return
         width = float(cmd.get("width_m", os.environ.get("UDRONE_COV_WIDTH", "12")))
         length = float(cmd.get("length_m", cmd.get("width_m",
                        os.environ.get("UDRONE_COV_LENGTH",
@@ -1311,15 +1331,40 @@ class CoralBehaviours(Node):
                 self._emit({"type": "failed", "id": ev["id"],
                             "reason": ev["failed"]})
             return
+        if kind == "hoop":
+            verdict = self._load_hoop_verdict()
+            if verdict:
+                meta = {
+                    **meta,
+                    "hoop_pass": bool(verdict.get("pass")),
+                    "why": verdict.get("why"),
+                    "exit_miss_m": verdict.get("exit_miss_m"),
+                    "plane": verdict.get("plane"),
+                    "reacquire_n": verdict.get("reacquire_n"),
+                    "exit_s": verdict.get("exit_s"),
+                    "exit_y": verdict.get("exit_y"),
+                    "exit_z": verdict.get("exit_z"),
+                }
+                if rc == 0 and not verdict.get("pass"):
+                    rc = 1
         if rc == 0:
             self._emit({"type": done, "id": self.active_id, "failed": None,
                         "tag_detected": False, **meta})
         else:
+            reason = str(meta.get("why") or f"{kind} exited {rc}") if kind == "hoop" else f"{kind} exited {rc}"
             self._emit({"type": done, "id": self.active_id,
-                        "failed": f"{kind} exited {rc}", "tag_detected": False, **meta})
-            self._emit({"type": "failed", "id": self.active_id,
-                        "reason": f"{kind} exited {rc}"})
+                        "failed": reason, "tag_detected": False, **meta})
+            self._emit({"type": "failed", "id": self.active_id, "reason": reason})
         self._clear_job()
+
+    def _load_hoop_verdict(self):
+        path = os.environ.get("UDRONE_HOOP_VERDICT", "/tmp/coral_hoop_verdict.json")
+        try:
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
 
     # ---- main tick ------------------------------------------------------
     def _tick(self):

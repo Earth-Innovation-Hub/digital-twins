@@ -822,3 +822,51 @@ def look_leg(east, north, cell_e, cell_n, stand: float = VIEW_STAND_M, near: flo
         return [close]
     # Too close to see the centre. Back out to the stand, then creep in facing it.
     return [view, close]
+
+
+# Last-metre center gates. Separate axes: hypot(y, z) let a deep hull look "on axis".
+PUNCH_Y_M = 0.15
+PUNCH_Z_M = 0.15
+PASS_EXIT_M = 0.60
+PASS_PLANE_M = 0.30
+
+
+def plane_sample(pos, center=HOOP_CENTER, axis=HOOP_AXIS) -> dict:
+    """Opening frame: s along the axis (0 at the ring), y left, z up, radial off-axis."""
+    s, y, z, _th, _left = hoop_frame(pos, center, axis)
+    return {
+        "s": float(s),
+        "y": float(y),
+        "z": float(z),
+        "radial": float(math.hypot(y, z)),
+    }
+
+
+def punch_centered(y, z, y_m: float = PUNCH_Y_M, z_m: float = PUNCH_Z_M) -> bool:
+    """True when horizontal and depth errors are each inside the punch gate."""
+    return abs(float(y)) <= float(y_m) and abs(float(z)) <= float(z_m)
+
+
+def hoop_pass(
+    plane,
+    exit_miss,
+    inner_m: float = INNER_PASS_M,
+    plane_tol: float = PASS_PLANE_M,
+    exit_m: float = PASS_EXIT_M,
+) -> bool:
+    """Crossed the opening disk and reached the frozen exit.
+
+    Time in the punch and a close camera crop do not count. Exit arrival
+    without a plane sample does not count.
+    """
+    if not isinstance(plane, dict):
+        return False
+    try:
+        radial = float(plane["radial"])
+        along = abs(float(plane["s"]))
+        miss = float(exit_miss)
+    except (KeyError, TypeError, ValueError):
+        return False
+    if not (math.isfinite(radial) and math.isfinite(along) and math.isfinite(miss)):
+        return False
+    return radial <= float(inner_m) and along <= float(plane_tol) and miss <= float(exit_m)

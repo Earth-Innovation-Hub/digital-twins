@@ -8,7 +8,7 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | (in-process) | `dock`, `goto`, `survey`, `hold`, `abort` | boat + latch |
 | `run_helix.py` | `helix` | AUV forward helix |
 | `run_swim.py` | `swim` | AUV straight leg (compass, world, or along heading) |
-| `run_hoop.py` | `hoop` | Front-camera search → approach/commit glide corridor → hoop-axis CEM tube (`hoop_mpc.py`); reacquire corridor on through fail |
+| `run_hoop.py` | `hoop` | Front-camera search → corridor to the gate → hold until centered → 0.6 m/s surge. Pass is `hoop_pass` (opening sample and exit); verdict on `hoop_done` |
 | `run_track_otter.py` | `track` | Hold under otter_k on deck tag 10 (`track_geom.py`) |
 | `run_search_otter.py` | `search_otter` | Aft station → expanding sine → under nest → lock deck tag 10 (up-cam); no latch; chain with `rendezvous` |
 | `run_rendezvous.py` | `rendezvous` | Nest-axis approach → deck tag 10 up-cam servo → latch (`rendezvous_geom.py`) |
@@ -22,12 +22,17 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | `coverage_plan.py` | (used by mapper / `coverage --plan map`) | Map-aware boustrophedon over costmap gaps |
 
 Helix, swim, hoop, track, and coverage share `UdroneHelixController` (force → point-hull-axis).
-`swim` is one polyline leg. `hoop` (`hoop_geom.py` + `hoop_mpc.py`) covers a
-dock-centred grid until the front camera's orange pixels form a ring, then
-yaw-holds the ring axis and flies a receding tube through the opening. Once
-three centre fixes agree, that centre is kept. A pass needs the ring around
-the optical axis and the hull inside the opening at ENU (6, 0, −4.626). Pitch
-from `rpy_from_q` is positive nose-down.
+`swim` is one polyline leg. `hoop` (`hoop_geom.py`) covers a dock-centred grid
+until the front camera's orange pixels form a ring, then flies the corridor
+to the gate. Inside 1.2 m it holds that gate with yaw free until `|y|` and
+`|dz|` are each within 0.15 m, then locks the axis and surges at 0.6 m/s.
+A pass (`hoop_pass`) needs one sample inside the authored opening (radial
+≤ 0.40 m, logged as `HOOP_PLANE`) and later arrival within 0.6 m of the
+frozen exit (`HOOP_EXIT`). Time in the punch and a close camera crop do not
+count. The runner writes `/tmp/coral_hoop_verdict.json` and one `HOOP_VERDICT`
+line; `coral_behaviours` copies the plane and exit fields onto `hoop_done`.
+`hoop_mpc.py` stays available behind `UDRONE_HOOP_MPC`. Pitch from `rpy_from_q`
+is positive nose-down.
 Every runner on `UdroneHelixController` publishes one HUD image,
 `/xudrone/hud/image` (latest frame also at `/tmp/xudrone_hud.jpg`, once a
 second; `UDRONE_HUD=0` turns it off). `hud_overlay.py` draws the task's camera
