@@ -13,7 +13,8 @@ Factors
 
 A keyframe is cut after KF_DIST_M of travel, KF_YAW_RAD of turn, KF_MAX_S of
 time, or when a tag needs a fresh pose to hang on. Tags in DYNAMIC_TAGS ride on
-a vehicle (tag 10 is under the Heron deck) and stay out of the static map.
+a vehicle (tag 10 is under the Heron deck, 11 and 12 are on its pontoon
+sterns) and stay out of the static map.
 
 GTSAM comes from a private directory (UDRONE_GTSAM_PATH, default
 /opt/udrone_py) so the system Python packages stay untouched. Without it,
@@ -45,7 +46,7 @@ KF_MAX_S = 10.0
 TAG_KF_S = 0.25              # a tag sighting cuts a keyframe if the last is older
 TAG_MAX_RANGE_M = 12.0
 DYNAMIC_TAGS = frozenset(
-    int(t) for t in os.environ.get("UDRONE_GRAPH_DYNAMIC_TAGS", "10").split(",") if t.strip()
+    int(t) for t in os.environ.get("UDRONE_GRAPH_DYNAMIC_TAGS", "10,11,12").split(",") if t.strip()
 )
 
 SIG_PRIOR_ROT, SIG_PRIOR_T = 0.05, 0.2

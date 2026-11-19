@@ -119,6 +119,7 @@ CMD_TOPIC = "/coral/command"
 EVT_TOPIC = "/coral/event"
 STS_TOPIC = "/coral/status"
 DET_TOPIC = "/coral/detections"
+BOAT_TAG_IDS = frozenset((10, 11, 12))
 DOCK_CMD = "/udrone_dock/command"
 
 
@@ -288,9 +289,11 @@ class CoralBehaviours(Node):
         self.last_detection = rec
 
     def _on_apriltag_raw(self, m):
-        if not m.detections:
+        # Tags riding on otter_k (deck 10, pontoon sterns 11 / 12) are not a
+        # survey or coverage find; the front camera sees them near the boat.
+        d = next((x for x in m.detections if int(x.id) not in BOAT_TAG_IDS), None)
+        if d is None:
             return
-        d = m.detections[0]
         # Pose estimate from current AUV/boat ENU (good enough for until-stop).
         n = e = None
         fresh, _, (boat, auv) = self.gz.read(self.boat_model, self.auv_model)
@@ -998,6 +1001,10 @@ class CoralBehaviours(Node):
             "UDRONE_PX4_INSTANCE": str(self.auv_px4),
             "UDRONE_HELIX_BEHAVIOUR": "1",
         }
+        # A plan that continues after the hoop (e.g. a rendezvous) keeps the
+        # vehicle armed on a missed pass instead of disarming it.
+        if str(cmd.get("on_fail") or "").lower() == "hold":
+            env["UDRONE_HOOP_FAIL_HOLD"] = "1"
         self._spawn_auv("hoop", cmd["id"], runner, env, {}, "/tmp/coral_hoop.log", cmd=cmd)
 
     def _start_track(self, cmd):
@@ -1344,6 +1351,7 @@ class CoralBehaviours(Node):
                     "exit_s": verdict.get("exit_s"),
                     "exit_y": verdict.get("exit_y"),
                     "exit_z": verdict.get("exit_z"),
+                    "held": bool(verdict.get("held")),
                 }
                 if rc == 0 and not verdict.get("pass"):
                     rc = 1

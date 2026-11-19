@@ -26,6 +26,9 @@ from rendezvous_geom import (
     aft_station,
     approach_corridor,
     axes,
+    capture_missed,
+    capture_reference,
+    centreline_heading,
     closing_range,
     closing_range_rate,
     cone_rim,
@@ -34,6 +37,7 @@ from rendezvous_geom import (
     gate_optical_range,
     glide_corridor,
     glide_path,
+    glide_speed_mps,
     glide_station,
     glide_threshold,
     glide_tip,
@@ -235,6 +239,25 @@ def main():
     bad_p = project_onto_glide(far_side, boat, LEVEL)
     assert bad_p["lat"] > 1.0
     assert not (bad_p["on_segment"] and bad_p["lat"] < 0.5)
+    # Once committed, crossing the tapered tube wall rejoins the local glide;
+    # it must never command the six-metre aft tip again.
+    centre_70 = glide_station(0.70, boat, LEVEL)["point"]
+    outside_70 = (centre_70[0], centre_70[1] + 1.0, centre_70[2])
+    recover = glide_corridor(outside_70, boat, LEVEL, prev_phase="glide")
+    assert recover["phase"] == "glide", recover
+    assert recover["s"] > 0.60 and recover["dist_tip"] > 3.0, recover
+    # A moving boat can put the raw projection just beyond the threshold.
+    # Committed guidance must hold/rejoin there, never restart at the aft tip.
+    beyond_thr = (thr[0] + 0.35, thr[1] + 0.55, thr[2])
+    beyond = glide_corridor(beyond_thr, boat, LEVEL, prev_phase="glide")
+    assert beyond["phase"] == "glide", beyond
+    assert not beyond["on_segment"] and beyond["dist_threshold"] < 0.75, beyond
+    # Flare speed is continuous and monotone; there is no step at GLIDE_FLARE_S.
+    v0 = glide_speed_mps(GLIDE_FLARE_S - 1e-4)
+    v1 = glide_speed_mps(GLIDE_FLARE_S + 1e-4)
+    assert abs(v1 - v0) < 0.002, (v0, v1)
+    speeds = [glide_speed_mps(u) for u in (0.0, 0.4, 0.6, 0.72, 0.85, 1.0)]
+    assert all(a + 1e-9 >= b for a, b in zip(speeds, speeds[1:])), speeds
 
     # Legacy approach_corridor still works for search_otter.
     aft = aft_station(boat, LEVEL)
@@ -273,6 +296,40 @@ def main():
         v = tuple(p[i] - s["nest"][i] for i in range(3))
         assert abs(math.sqrt(sum(c * c for c in v)) - CONE_RANGE_M) < 1e-9
         assert abs(math.acos(-v[2] / CONE_RANGE_M) - CONE_HALF) < 1e-9
+
+    # Centreline heading: turn toward the line, bounded, damped by sideways rate.
+    bq = yaw_q(math.radians(90.0))           # boat heads north; left is west
+    nest = nest_world(boat, bq)
+    on_line = (nest[0], nest[1] - 3.0, -1.0)
+    yaw0, left0 = centreline_heading(on_line, boat, bq, 1.4, math.radians(30.0))
+    assert abs(left0) < 1e-9 and abs(yaw0 - math.radians(90.0)) < 1e-9
+    west = (nest[0] - 0.5, nest[1] - 3.0, -1.0)  # 0.5 m left of the line
+    yaw_w, left_w = centreline_heading(west, boat, bq, 1.4, math.radians(30.0))
+    assert abs(left_w - 0.5) < 1e-9
+    assert math.radians(60.0) <= yaw_w < math.radians(90.0)   # turns right (east)
+    yaw_c, _ = centreline_heading((nest[0] - 5.0, nest[1], -1.0), boat, bq, 1.4, math.radians(30.0))
+    assert abs(yaw_c - math.radians(60.0)) < 1e-9             # clamped
+    # Already closing on the line fast: back the turn off.
+    yaw_d, _ = centreline_heading(west, boat, bq, 1.4, math.radians(30.0), lat_rate=-0.5, damp_s=1.0)
+    assert abs(yaw_d - math.radians(90.0)) < 1e-9
+
+    # Capture reference: forward along the heading, depth nudged toward along_m.
+    on_depth = (nest[0], nest[1] - 0.3, nest[2] - 0.3)
+    _pt, vel0 = capture_reference(on_depth, boat, bq, math.radians(90.0), speed=0.15, along_m=0.25)
+    assert abs(vel0[1] - 0.15) < 1e-9 and abs(vel0[0]) < 1e-9
+    cap = (nest[0], nest[1] - 0.3, nest[2] - 0.8)
+    pt, vel = capture_reference(cap, boat, bq, math.radians(90.0), speed=0.15, along_m=0.25)
+    assert 0.0 < vel[1] < 0.08 and abs(vel[0]) < 1e-9          # deep: crawl slower
+    assert 0.0 < vel[2] <= 0.12 + 1e-9                         # too deep: rise
+    assert pt[1] > cap[1] and pt[2] > cap[2]
+    _pt, vel_hi = capture_reference((nest[0], nest[1], nest[2] - 0.1), boat, bq, math.radians(90.0))
+    assert vel_hi[2] < 0.0                                     # too shallow: sink
+
+    # Missed approach: past the nest, wide, or deep; inside the sphere is a pass.
+    assert capture_missed((nest[0], nest[1] + 0.2, nest[2] - 0.3), boat, bq) is None
+    assert capture_missed((nest[0], nest[1] + 0.7, nest[2] - 0.3), boat, bq) == "past"
+    assert capture_missed((nest[0] - 1.2, nest[1], nest[2] - 0.3), boat, bq) == "wide"
+    assert capture_missed((nest[0], nest[1], nest[2] - 1.5), boat, bq) == "deep"
     print("rendezvous geometry ok")
 
 

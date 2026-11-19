@@ -28,7 +28,9 @@ Kiwanis Lake bed + shoreline in Gazebo Sim; entities `heron_0` (yellow ASV) and
 carries **AprilTag 36h11 id 0** (0.40 m) on **all six faces** so front, nadir, and
 side views can lock for survey stop and `approach_tag`. **AprilTag 36h11 id 10**
 (0.40 m) is centered on the underside of the Heron deck, facing down, for the
-upward camera. A **1 m vertical orange
+upward camera. **Ids 11 and 12** (0.24 m) are on the stern ends of the port
+and starboard pontoons, facing aft, for the front camera on the glide path.
+The boat's tags are self-lit; they face away from the sun. A **1 m vertical orange
 ring** (tube radius 0.045 m, 12 segments) sits at ENU (6, 0, −4.626), the
 midpoint of the water column, opening along east-west. It has no AprilTags;
 `hoop` finds it with the front camera.
@@ -175,7 +177,7 @@ Commands:
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
 | `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
-| `hoop` | xudrone | Front-camera search, then a corridor to the gate. Inside 1.2 m the hull holds the gate with the nose free until the horizontal miss and the depth miss are each within 0.15 m, then surges at 0.6 m/s. A pass is one authored sample inside the opening (radial ≤ 0.40 m) and later arrival within 0.6 m of the frozen exit. `hoop_done` carries that verdict (`hoop_pass`, plane, exit miss). Rejected while latched. HUD: `/xudrone/hud/image` |
+| `hoop` | xudrone | Front-camera search. The grid dives before it translates. A closed ring that matches the authored hoop starts one pursuit reference (the image does not have to be centered): dive in place, slide onto the centreline, cruise at 0.32 m/s, brake to a stop at the exit. The nose stays free. The through-direction is frozen at entry. A pass is one authored sample inside the opening (radial ≤ 0.40 m) and later arrival within 0.6 m of the frozen exit. `hoop_done` carries that verdict (`hoop_pass`, plane, exit miss). Rejected while latched. HUD: `/xudrone/hud/image` |
 | `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
 | `search_otter` | xudrone | Aft station → expanding sine until under the nest → lock deck tag 10 (up-cam) — no latch. Chain with `rendezvous`. Phrase `xudrone, search for otter_k` |
 | `rendezvous` | xudrone | Nest-axis dock under otter_k. Aft corridor → up-cam deck tag 10 servo on boat −Z → acceptance cone dock (MPC). Cone: 42° / 3.5 m, heading ≤40°, tilt ≤48°; ATTACH inside 0.55 m / 28° (LinkAttacher still 0.6 m / 30°). Optional `power_pct` (5–100). Phrase `xudrone, rendezvous and dock with otter_k` or `… with 50% power` |
@@ -190,7 +192,10 @@ Perception: otter_k nadir → `/otter_k/detections`; xudrone **front** →
 `/xudrone/detections` (primary until-stop while pitched); xudrone nadir →
 `/xudrone/detections_down` + `tag_detector` ENU / tracks; xudrone **upward** →
 `/xudrone/detections_up` (deck tag 10). Nest search and rendezvous use that
-underside deck tag only.
+underside deck tag only. `rendezvous` also logs which of tags 10, 11 and 12
+each camera decodes (`VIS` lines in `/tmp/coral_rendezvous.log`). The front
+camera holds the stern tags from about 7.6 m to 2.5 m; inside about 1.4 m no
+camera has a tag. `apriltag.yaml` sizes ids 11 and 12 at 0.24 m.
 
 `track` is the Kiwanis form of Harish Anand's thesis,
 [Coordinated Navigation and Localization of an Autonomous Underwater Vehicle Using an Autonomous Surface Vehicle in the OpenUAV Simulation Framework](https://keep.lib.asu.edu/_flysystem/fedora/c7/233928/Anand_asu_0010N_20290.pdf)

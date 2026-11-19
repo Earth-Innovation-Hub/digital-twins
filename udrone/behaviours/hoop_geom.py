@@ -445,6 +445,26 @@ def pass_depth(z: float) -> float:
     return min(PASS_TOP, max(HOOP_FLOOR + 0.5, float(z)))
 
 
+def leg_clock(z_now, search_z, band, held, t0, tm, shallow_t):
+    """Dive-then-translate clock for one search leg.
+
+    Returns ``(hold, held, t0, shallow_t)``. ``hold`` means stay on the depth
+    point. The clock starts the first time the hull is within ``band`` of
+    ``search_z``. A later shallow bob pauses that clock. It does not restart.
+    """
+    shallow = float(z_now) > float(search_z) + float(band)
+    if shallow:
+        if held and shallow_t is None and t0 is not None:
+            shallow_t = float(tm)
+        return True, bool(held), t0, shallow_t
+    if not held or t0 is None:
+        return False, True, float(tm), None
+    if shallow_t is not None:
+        t0 = float(t0) + (float(tm) - float(shallow_t))
+        shallow_t = None
+    return False, True, t0, shallow_t
+
+
 # ---------------------------------------------------------------------------
 # Approach corridor (rendezvous-style): station → gate → through → exit.
 # Wide at the approach station, narrow at the gate; HUD draws the funnel.
@@ -525,6 +545,99 @@ def exit_station(center, through, exit_m: float = EXIT_STANDOFF_M):
     )
 
 
+def project_onto_hoop(auv_pos, tip, gate):
+    """Project the hull onto the station→gate segment.
+
+    ``s_prog`` is 0 at the approach station and 1 at the gate. ``on_segment``
+    is false when the raw projection falls outside that interval, so a hull
+    beside the ring cannot clamp to the gate and look like it has arrived.
+    ``tube_lat`` is the 3D distance to the closest point on the segment.
+    """
+    delta = tuple(float(gate[i]) - float(tip[i]) for i in range(3))
+    length = math.sqrt(sum(c * c for c in delta)) or 1.0
+    tangent = tuple(c / length for c in delta)
+    rel = tuple(float(auv_pos[i]) - float(tip[i]) for i in range(3))
+    along = sum(rel[i] * tangent[i] for i in range(3))
+    s_raw = along / length
+    s_prog = max(0.0, min(1.0, s_raw))
+    closest = tuple(float(tip[i]) + s_prog * delta[i] for i in range(3))
+    miss = tuple(float(auv_pos[i]) - closest[i] for i in range(3))
+    tube_lat = math.sqrt(sum(c * c for c in miss))
+    return {
+        "s_prog": s_prog,
+        "s_raw": s_raw,
+        "on_segment": 0.0 <= s_raw <= 1.0,
+        "tube_lat": tube_lat,
+        "length_m": length,
+        "closest": closest,
+        "tangent": tangent,
+    }
+
+
+LOCK_HORIZ_M = 1.25
+LOCK_DEPTH_M = 0.85
+
+
+def authored_ring_lock(center, hoop=HOOP_CENTER, horiz_m: float = LOCK_HORIZ_M,
+                       depth_m: float = LOCK_DEPTH_M) -> bool:
+    """True when a vision centre is the authored ring, not a rim or a bed blob.
+
+    The image does not have to be centered. A shallow approach keeps the ring
+    low in the frame for the whole dive, and waiting on that gate is what let
+    the lead planner run through the opening.
+    """
+    dx = float(center[0]) - float(hoop[0])
+    dy = float(center[1]) - float(hoop[1])
+    dz = float(center[2]) - float(hoop[2])
+    return math.hypot(dx, dy) <= float(horiz_m) and abs(dz) <= float(depth_m)
+
+
+def approach_point(pos, vel, back_s: float = 1.0):
+    """A point behind the hull, so a sample already past the plane keeps its side.
+
+    ``through_dir`` flips when the sample crosses the ring. Stepping back along
+    the horizontal velocity leaves the approach side in place.
+    """
+    vx = float(vel[0]) if vel is not None else 0.0
+    vy = float(vel[1]) if vel is not None and len(vel) > 1 else 0.0
+    if math.hypot(vx, vy) < 0.05:
+        return (float(pos[0]), float(pos[1]), float(pos[2]))
+    back = float(back_s)
+    return (
+        float(pos[0]) - back * vx,
+        float(pos[1]) - back * vy,
+        float(pos[2]),
+    )
+
+
+def surge_speed(along_m, punch_mps: float = 0.60, taper_m: float = 1.0) -> float:
+    """Along-track surge toward an exit. Zero once the hull has passed it.
+
+    The last ``taper_m`` falls linearly to zero. A constant 0.6 m/s is faster
+    than the position loop can cancel, so the hull coasted past the exit.
+    """
+    along = float(along_m)
+    if along <= 0.0:
+        return 0.0
+    punch = max(0.0, float(punch_mps))
+    taper = max(0.2, float(taper_m))
+    if along >= taper:
+        return punch
+    return punch * along / taper
+
+
+def corridor_lead_point(tip, gate, s_prog, length_m, speed_mps=0.32, lead_s=0.35):
+    """Centreline point a fraction of a second ahead of the current projection.
+
+    The lead is capped at 0.15 of the segment, matching the dock glide.
+    """
+    lead = min(0.15, float(lead_s) * float(speed_mps) / max(0.2, float(length_m)))
+    s_cmd = min(1.0, max(0.0, float(s_prog)) + lead)
+    delta = tuple(float(gate[i]) - float(tip[i]) for i in range(3))
+    point = tuple(float(tip[i]) + s_cmd * delta[i] for i in range(3))
+    return point, s_cmd, lead
+
+
 def hoop_frame(pos, center, through):
     """(s, y, z) with s along through (0 at opening; approach s < 0)."""
     th = _unit_xy(through)
@@ -552,16 +665,27 @@ def hoop_corridor(
     gate_arrive_m: float = GATE_ARRIVE_M,
     half_approach: float = CORRIDOR_HALF_APPROACH_M,
     half_gate: float = CORRIDOR_HALF_GATE_M,
+    through=None,
 ):
     """Progress along the hoop approach corridor (rendezvous analogue).
+
+    ``through``, when given, is the fly-through direction frozen at corridor
+    entry. Without it, the side is taken from where the hull sits now.
 
     ``phase``:
       - ``approach``: swim to the approach station
       - ``commit``: fly the tapering funnel toward the gate
       - ``through``: at the gate, on-axis enough to punch through
+
+    ``near_tube`` is the dock-glide capture test: on the station→gate segment
+    and inside the taper. A clamped projection beside the ring is not on it.
     """
-    th = through_dir(auv_pos, center, axis)
-    appr = approach_station(center, axis, auv_pos, standoff_m=approach_m)
+    th = _unit_xy(through) if through is not None else through_dir(auv_pos, center, axis)
+    appr = (
+        float(center[0]) - float(approach_m) * th[0],
+        float(center[1]) - float(approach_m) * th[1],
+        pass_depth(center[2]),
+    )
     gate = gate_station(center, th, standoff_m=gate_m)
     exit_pt = exit_station(center, th, exit_m=exit_m)
     s, y, z, fwd, left = hoop_frame(auv_pos, center, th)
@@ -578,6 +702,14 @@ def hoop_corridor(
     t = max(0.0, min(1.0, (float(approach_m) + s) / span))
     half = float(half_approach) + t * (float(half_gate) - float(half_approach))
     in_funnel = lat <= half * 1.15 + 1e-9
+    proj = project_onto_hoop(auv_pos, appr, gate)
+    tube_lat = float(proj["tube_lat"])
+    in_tube = tube_lat <= half * 1.15 + 1e-9
+    near_tube = (
+        bool(proj["on_segment"])
+        and in_tube
+        and tube_lat <= max(half * 1.5, 1.25)
+    )
     prev = (prev_phase or "").lower()
     sticky_commit = prev in ("commit", "through", "approach")
     on_gate = dist_gate <= float(gate_arrive_m) and lat <= float(half_gate) * 1.25
@@ -608,6 +740,14 @@ def hoop_corridor(
         "in_funnel": in_funnel,
         "dist_approach": dist_appr,
         "dist_gate": dist_gate,
+        "s_prog": float(proj["s_prog"]),
+        "s_raw": float(proj["s_raw"]),
+        "on_segment": bool(proj["on_segment"]),
+        "tube_lat": tube_lat,
+        "near_tube": near_tube,
+        "length_m": float(proj["length_m"]),
+        "tangent": proj["tangent"],
+        "closest": proj["closest"],
     }
 
 
@@ -632,14 +772,19 @@ def hoop_glide_path(
     half_gate: float = CORRIDOR_HALF_GATE_M,
     in_funnel: bool = False,
     through_ok: bool = False,
+    through=None,
 ):
     """HUD funnel for the hoop corridor (ILS-style rails + range gates)."""
     veh = vehicle if vehicle is not None else (
         float(center[0]) - float(approach_m), float(center[1]), float(center[2]),
     )
-    th = through_dir(veh, center, axis)
+    th = _unit_xy(through) if through is not None else through_dir(veh, center, axis)
     left = _left_xy(th)
-    appr = approach_station(center, axis, veh, standoff_m=approach_m)
+    appr = (
+        float(center[0]) - float(approach_m) * th[0],
+        float(center[1]) - float(approach_m) * th[1],
+        pass_depth(center[2]),
+    )
     gate = gate_station(center, th, standoff_m=gate_m)
     exit_pt = exit_station(center, th, exit_m=exit_m)
     opening = (float(center[0]), float(center[1]), pass_depth(center[2]))
@@ -845,6 +990,17 @@ def plane_sample(pos, center=HOOP_CENTER, axis=HOOP_AXIS) -> dict:
 def punch_centered(y, z, y_m: float = PUNCH_Y_M, z_m: float = PUNCH_Z_M) -> bool:
     """True when horizontal and depth errors are each inside the punch gate."""
     return abs(float(y)) <= float(y_m) and abs(float(z)) <= float(z_m)
+
+
+def ready_to_punch(dist_gate, y, z, gate_m: float = GATE_ARRIVE_M,
+                   y_m: float = PUNCH_Y_M, z_m: float = PUNCH_Z_M) -> bool:
+    """Surge only from the gate itself, once both axes are centered.
+
+    The 1.2 m ball is the hold. Punching from its outer edge open-loops about
+    2.4 m before the ring, and a hull that is already on the centreline never
+    stops at the gate.
+    """
+    return float(dist_gate) <= float(gate_m) and punch_centered(y, z, y_m, z_m)
 
 
 def hoop_pass(

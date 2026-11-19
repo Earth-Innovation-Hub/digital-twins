@@ -1,5 +1,6 @@
 """Dock-phase receding MPC: centers laterally, climbs under the cone, latches path."""
 import math
+import random
 
 from rendezvous_geom import DOCK_STANDOFF_M, cone_state, nest_axis_point
 from dock_mpc import (
@@ -51,6 +52,22 @@ def main():
     fin = plan(cone_n, climb_mps=0.13)
     # Hold climb while off-axis in the final metre (do not shrink the cone).
     assert abs(fin["u0"][0]) < 1e-9, fin["u0"]
+    # A leftover climb in the lag state must not be published during that hold.
+    held = plan(cone_n, climb_mps=0.13, v_state=(-0.13, 0.05, -0.04), rng=random.Random(1))
+    assert abs(held["u0"][0]) < 1e-9, held["u0"]
+    assert abs(held["v_lag"][0]) < 1e-9, held["v_lag"]
+    assert abs(held["along"] - along_n) < 1e-6, (held["along"], along_n)
+    # The executed lag uses the control tick. 50 ms moves much less than a
+    # 200 ms horizon step, from the same command and the same noise.
+    slow = plan(cone2, climb_mps=0.13, dt=0.05, rng=random.Random(2))
+    fast = plan(cone2, climb_mps=0.13, dt=0.20, rng=random.Random(2))
+    assert abs(slow["v_lag"][0]) < abs(fast["v_lag"][0]) - 1e-4, (slow["v_lag"], fast["v_lag"])
+    # Successive calls do not restart a fixed seed: the same state with a
+    # continuing generator is not required to match Random(0) twice.
+    same = random.Random(3)
+    first = plan(cone, climb_mps=0.13, rng=same)
+    second = plan(cone, climb_mps=0.13, warm=first["warm"], v_state=first["v_lag"], rng=same)
+    assert len(second["warm"]) == len(first["warm"]) == 10
     # Soft capture: setpoint lateral closer to axis than live offset.
     assert abs(fin["point"][0] - 10.0) < abs(near[0] - 10.0), fin["point"]
 

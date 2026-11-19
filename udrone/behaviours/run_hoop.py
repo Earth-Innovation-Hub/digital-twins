@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Search for the Kiwanis hula hoop and swim through the opening.
 
-Search covers a dock-centred grid until the front camera locks the orange
-ring. Then the hull flies a rendezvous-style corridor: approach station on
-the centreline → tapering glide path to the gate. In the last metre it
-holds that gate, nose free, until horizontal and depth errors are each
-inside 0.15 m, then surges open-loop to a frozen ENU exit. Vision loss in
-the opening is expected. A pass is an authored-plane crossing plus arrival
-at that exit, written once as HOOP_VERDICT.
+Search covers a dock-centred grid. The grid finishes its dive before it
+translates, so the nose does not pitch while sliding sideways. A closed ring
+that matches the authored hoop starts one pursuit reference: dive in place,
+slide onto the centreline, then cruise at 0.32 m/s and brake to a stop at
+the exit. The nose stays free. The through-direction is frozen at entry.
+Vision loss in the opening is expected. A pass is an authored-plane crossing
+plus arrival at that exit, written once as HOOP_VERDICT.
 If the open-loop punch misses the exit after the through budget, the
 corridor can be reacquired at the approach station (capped). HUD draws the
 glide-path funnel on ``/xudrone/hud/image``. Coral ``hoop``.
@@ -38,9 +38,12 @@ from hoop_geom import (
     RING_OUTER_M,
     SEARCH_HITS,
     SEARCH_Z,
-    SIDEWAYS_M,
     WEDGE_NEAR_M,
+    APPROACH_STANDOFF_M,
     CoverageMap,
+    approach_point,
+    authored_ring_lock,
+    corridor_lead_point,
     debug_caption,
     fly_trajectory,
     hoop_corridor,
@@ -48,17 +51,19 @@ from hoop_geom import (
     horizontal_axis,
     hoop_pass,
     in_opening,
+    leg_clock,
     level_feature,
     look_leg,
     look_step,
     orange_ring,
     pass_depth,
     plane_sample,
-    punch_centered,
+    ready_to_punch,
+    surge_speed,
+    through_dir,
     ring_center,
-    sideways_baseline,
 )
-from patterns import path_length_3d, polyline_pos_vel, world_offset_to_path
+from patterns import path_length_3d, polyline_pos_vel, slew_angle, world_offset_to_path
 from servo_geom import relock_leg
 from udrone_sinusoidal_controller import (
     UdroneHelixController,
@@ -73,14 +78,6 @@ EXIT_M = 2.0
 SEARCH_BUDGET_S = 200.0
 THROUGH_BUDGET_S = 80.0
 SEARCH_RETRY_S = 40.0   # extra search after a rare through abort near the budget
-COMMIT_RANGE = (1.15, 8.0)  # allow commit once close (was 2.4 — rejected last-metre locks)
-CENTER_PX = 0.35            # levelled lateral error before the sweep is planned
-CENTER_PY = 0.45            # levelled vertical error
-COMMIT_ASPECT = 0.55        # minor/major; near enough to the ring axis to pass
-# Well-centered radial approach may never accumulate SIDEWAYS_M — waive it.
-COMMIT_CENTER_PX = 0.18
-COMMIT_CENTER_PY = 0.22
-COMMIT_CENTER_ASPECT = 0.60
 LOST_S = 1.5
 # Within this range of a known centre, never look-step toward orange (rim chase).
 CENTERLINE_HOLD_M = 5.5
@@ -88,12 +85,25 @@ NOSE_DOWN_CAP = 0.85        # rad; past this, do not command a deeper setpoint
 THROUGH_PITCH_RAD = math.radians(40.0)  # enough nose-up to climb onto the opening
 APPROACH_PITCH_RAD = math.radians(40.0)
 MAX_REACQUIRE = 3
+GOAROUND_MPS = 0.25         # loop beside the ring after a miss
+GOAROUND_SIDE_M = 1.6       # clear of the ring (outer radius ~0.6 m) plus the hull
+GOAROUND_BACK_M = 3.5       # rejoin the axis this far in front of the plane
 # Last metre: hold the gate until centered, then surge open-loop to the exit.
 # A combined lat gate let a deep, off-axis hull freeze the exit (false PASS).
 OPEN_LOOP_M = 1.2           # start centering when this close to the gate
 EXIT_ARRIVE_M = 0.60        # arrive at the virtual exit behind the ring
 PUNCH_SPEED = 0.60          # committed surge once centered; approach stays SPEED
 PUNCH_CLIMB_MPS = 0.22      # extra +Z while centering, or if still slightly deep
+# Dock-glide capture. Lead is a fraction of a second along the centreline.
+GLIDE_LEAD_S = 0.35
+DIVE_DEPTH_ERR_M = 0.35     # shallower than the ring by this much → yaw stays free
+DIVE_VZ_MPS = 0.24
+STATION_LOCK_M = 1.2        # lock the through-axis only this close to the station
+LOCK_FRAMES = 3             # unique camera frames, not repeated control ticks
+RING_FILTER_ALPHA = 0.25
+RING_FILTER_STEP_M = 0.40   # cap one-frame world-centre innovation
+VISUAL_TRIM_ALPHA = 0.10
+VISUAL_TRIM_MAX_M = 0.08    # guidance only; pass score stays on authored geometry
 
 
 def _cv2_ok() -> bool:
@@ -124,6 +134,9 @@ class UdroneHoopController(UdroneHelixController):
         self._img = None
         self._sight_stamp = None
         self._sight_hit = None
+        self._sight_new = False
+        self._ring_center_filt = None
+        self._vision_trim = (0.0, 0.0)
         self._map = None
         self._goal_cell = None
         self._goal_xy = None
@@ -175,13 +188,35 @@ class UdroneHoopController(UdroneHelixController):
         self._mpc_v_state = (0.0, 0.0, 0.0)
         self._des = None
         self._vel = (0.0, 0.0, 0.0)
+        self._acc = (0.0, 0.0, 0.0)
+        self._slew_v = (0.0, 0.0, 0.0)
+        self._slew_arm = None
+        self._slew_tm = None
+        self._slew_prev_tm = None
+        self._yaw_cmd = None
+        self._yaw_tm = None
+        self._track_mode = None
+        self._leg_held_deep = False
+        self._leg_shallow_t = None
+        self._leg_rebased = False
         self._mpc_log_t = 0.0
         self._mpc_tm = None
         self._through_blind_logged = False
         self._search_extra = 0.0
         self._corridor = None
+        self._lock_hits = 0
         self._reacquire_n = 0
         self._off_tube_t0 = None
+        # Hold the vehicle armed for the next plan step instead of disarming
+        # when the pass fails (set by coral_behaviours when a rendezvous follows).
+        self._fail_hold = os.environ.get("UDRONE_HOOP_FAIL_HOLD", "") == "1"
+        self._held = False
+        self._ga_wps = []
+        self._ga_t0 = None
+        self._ga_end = None
+        self._ga_time = 0.0
+        self._tick_tm = 0.0
+        self.elev_from_command = True
         self.hud_preview = False
         self._use_cv2 = _cv2_ok()
         info_topic = os.environ.get("UDRONE_HOOP_INFO_TOPIC", "/xudrone/camera_front/camera_info")
@@ -236,6 +271,7 @@ class UdroneHoopController(UdroneHelixController):
 
     def _sight(self, tm, pos, q):
         """Latest orange-ring centre, or None. One fit per camera frame."""
+        self._sight_new = False
         bgr = self._bgr()
         if bgr is None:
             return None
@@ -243,6 +279,7 @@ class UdroneHoopController(UdroneHelixController):
         if stamp == self._sight_stamp:
             return self._sight_hit
         self._sight_stamp = stamp
+        self._sight_new = True
         hit = orange_ring(bgr)
         if hit is None:
             self._sight_hit = None
@@ -271,6 +308,18 @@ class UdroneHoopController(UdroneHelixController):
         x_n = (hit["u"] - self.cx) / max(self.fx, 1.0)
         y_n = (hit["v"] - self.cy) / max(self.fy, 1.0)
         x_l, y_l = level_feature(x_n, y_n, pitch)
+        hit["center_raw"] = center
+        if hit.get("closed"):
+            if self._ring_center_filt is None:
+                self._ring_center_filt = center
+            else:
+                prev = self._ring_center_filt
+                self._ring_center_filt = hoop_mpc.filter_center(
+                    prev, center,
+                    alpha=RING_FILTER_ALPHA,
+                    step_m=RING_FILTER_STEP_M,
+                )
+            center = self._ring_center_filt
         hit["center"] = center
         hit["z_opt"] = z_opt
         hit["fwd"] = fwd
@@ -290,57 +339,44 @@ class UdroneHoopController(UdroneHelixController):
                 pass
         return hit
 
-    def _commit(self, tm, pos, hit):
-        if time.time() >= self._ring_log_t:
-            self._ring_log_t = time.time() + 1.0
-            c = hit["center"]
-            print(
-                f"HOOP_RING u={hit['u']:.0f} v={hit['v']:.0f} "
-                f"major={hit['major']:.0f} aspect={hit['aspect']:.2f} "
-                f"level=({hit['x_l']:+.2f},{hit['y_l']:+.2f}) "
-                f"range={hit['z_opt']:.2f} closed={int(bool(hit['closed']))} "
-                f"center=({c[0]:.2f},{c[1]:.2f},{c[2]:.2f})",
-                flush=True,
-            )
-        if not hit["closed"]:
+    def _update_visual_trim(self, hit):
+        """Small filtered y/z correction; never let vision move the ring plane.
+
+        The authored model remains the primary geometry. A complete ring at
+        useful range may remove a few centimetres of camera/map bias, but a
+        clipped near-field rim cannot retarget the corridor.
+        """
+        if (
+            not self._sight_new
+            or hit is None
+            or not hit.get("closed")
+            or "center" not in hit
+            or not (2.0 <= float(hit.get("z_opt", 0.0)) <= 8.0)
+            or not authored_ring_lock(hit["center"])
+        ):
             return
-        if abs(hit["x_l"]) > CENTER_PX or abs(hit["y_l"]) > CENTER_PY:
-            return
-        if hit["aspect"] < COMMIT_ASPECT:
-            return
-        if not (COMMIT_RANGE[0] <= hit["z_opt"] <= COMMIT_RANGE[1]):
-            return
-        center = hit["center"]
-        if center[2] > -0.35 or center[2] < HOOP_FLOOR:
-            return
-        stamp = self._img[4] if self._img is not None else None
-        if stamp == self._fix_stamp:
-            return
-        self._fix_stamp = stamp
-        self._fix_samples.append(center)
-        self._fix_samples = self._fix_samples[-5:]
-        if len(self._fix_samples) < 3:
-            return
-        well_centered = (
-            abs(hit["x_l"]) <= COMMIT_CENTER_PX
-            and abs(hit["y_l"]) <= COMMIT_CENTER_PY
-            and hit["aspect"] >= COMMIT_CENTER_ASPECT
+        _s, y, z, _fwd, _left, _up = hoop_mpc.hoop_state(
+            hit["center"], HOOP_CENTER, HOOP_AXIS,
         )
-        if not well_centered and not sideways_baseline(self._slides, SIDEWAYS_M):
-            return
-        pts = self._fix_samples
-        med = tuple(sorted(p[i] for p in pts)[len(pts) // 2] for i in range(3))
-        if max(math.dist(p, med) for p in pts[-3:]) > 0.40:
-            return
-        if self.anchor is None:
-            return
-        heading = horizontal_axis(hit["fwd"])
-        _points, axis = fly_trajectory(pos, heading, med, LEAD_M, EXIT_M, through=True)
-        self._fix_samples.clear()
-        self._fix_origin = None
-        self._relock = False
-        self._servo = None
-        self._enter_corridor(tm, pos, med, axis, why=f"centered={int(well_centered)}")
+        target = (
+            max(-VISUAL_TRIM_MAX_M, min(VISUAL_TRIM_MAX_M, float(y))),
+            max(-VISUAL_TRIM_MAX_M, min(VISUAL_TRIM_MAX_M, float(z))),
+        )
+        self._vision_trim = tuple(
+            (1.0 - VISUAL_TRIM_ALPHA) * float(self._vision_trim[i])
+            + VISUAL_TRIM_ALPHA * target[i]
+            for i in range(2)
+        )
+
+    def _guidance_center(self):
+        """Authored centre plus bounded filtered lateral/depth visual trim."""
+        fwd, left, up = hoop_mpc.hoop_axes(HOOP_AXIS)
+        del fwd
+        y, z = self._vision_trim
+        return tuple(
+            float(HOOP_CENTER[i]) + y * float(left[i]) + z * float(up[i])
+            for i in range(3)
+        )
 
     def _centerline_gate(self, pos, center, axis_xy=None):
         """Standoff on the opening axis — never an orange-rim aim point."""
@@ -408,6 +444,8 @@ class UdroneHoopController(UdroneHelixController):
         only when the aim has moved by more than a metre.
         """
         if self.anchor is None:
+            return
+        if self.stage in ("approach", "commit", "reacquire", "center", "through"):
             return
         known = None
         if "center" in hit and HOOP_FLOOR <= hit["center"][2] <= -0.35:
@@ -506,6 +544,7 @@ class UdroneHoopController(UdroneHelixController):
         self._plan_kind = None
         self._search_wps = []
         self._leg_t0 = None
+        self._leg_rebased = False
         self._goal_cell = None
         self._prev = None
         self.vel = (0.0, 0.0, 0.0)
@@ -558,19 +597,8 @@ class UdroneHoopController(UdroneHelixController):
             f"HOOP_REAL xyz=({pos[0]:.2f},{pos[1]:.2f},{pos[2]:.2f}) real_miss={miss:.2f}",
             flush=True,
         )
-        # Physical through before the corridor locks: use the authored ring,
-        # but do not aim at the exit until the hull is centered on the gate.
-        if self.stage in ("through", "center"):
-            return
-        corr = hoop_corridor(pos, HOOP_CENTER, HOOP_AXIS, prev_phase="commit")
-        self._center = tuple(float(c) for c in HOOP_CENTER)
-        self._axis = corr["through"]
-        self._corridor = corr
-        self._exit = tuple(float(c) for c in corr["exit"])
-        if self._punch_ready(pos, corr):
-            self._enter_through(float(tm), pos, corr)
-        else:
-            self._hold_gate(pos, corr)
+        if self.stage not in ("approach", "commit", "reacquire", "center", "goaround"):
+            self._enter_corridor(float(tm), pos, HOOP_CENTER, HOOP_AXIS, why="opening")
 
     def _note_surround(self, hit):
         if self._surrounded or hit is None or not hit.get("closed"):
@@ -621,15 +649,19 @@ class UdroneHoopController(UdroneHelixController):
         return None
 
     def _enter_corridor(self, tm, pos, center, axis, why: str = ""):
-        """Lock the fix and start the approach-station → gate glide path."""
+        """Lock the fix. Join the tube if already on it; otherwise go to the station.
+
+        The through-direction is taken once, from which side the hull is on,
+        and is not recomputed if a later graze crosses the ring plane.
+        """
         self._center = tuple(float(c) for c in center)
-        self._axis = (
-            float(axis[0]), float(axis[1]),
-            float(axis[2]) if len(axis) > 2 else 0.0,
+        sample = approach_point(pos, self.vel)
+        th = through_dir(sample, self._center, axis if axis is not None else HOOP_AXIS)
+        self._axis = (float(th[0]), float(th[1]), 0.0)
+        corr = hoop_corridor(
+            pos, self._center, self._axis, prev_phase=None, through=self._axis,
         )
-        corr = hoop_corridor(pos, self._center, self._axis, prev_phase=None)
         self._corridor = corr
-        self._axis = corr["through"]
         self._exit = corr["exit"]
         self._through_t0 = None
         self._through_seen = None
@@ -638,28 +670,27 @@ class UdroneHoopController(UdroneHelixController):
         self._mpc_warm = None
         self._mpc_v_state = (0.0, 0.0, 0.0)
         self._vel = (0.0, 0.0, 0.0)
+        self._acc = (0.0, 0.0, 0.0)
+        self._track_mode = None
         self._off_tube_t0 = None
         self._wps = []
         self._tracking = False
         self._approach_wps = []
         self.stage = "approach"
-        self._des = corr["approach"]
-        self._sweep_world = [pos, corr["approach"], corr["gate"], corr["exit"]]
         print(
-            f"HOOP_CORRIDOR enter approach "
+            f"HOOP_CORRIDOR track "
             f"center=({self._center[0]:.2f},{self._center[1]:.2f},{self._center[2]:.2f}) "
-            f"through=({corr['through'][0]:+.2f},{corr['through'][1]:+.2f}) "
-            f"station=({corr['approach'][0]:.2f},{corr['approach'][1]:.2f}) "
-            f"gate=({corr['gate'][0]:.2f},{corr['gate'][1]:.2f}) {why}",
+            f"through=({self._axis[0]:+.2f},{self._axis[1]:+.2f}) {why}",
             flush=True,
         )
+        self._apply_track(pos)
 
     def _reacquire_corridor(self, tm, pos, reason: str):
         """Through failed — return to the approach station and try again."""
         self._reacquire_n += 1
         self._search_extra = max(self._search_extra, SEARCH_RETRY_S)
         if self._reacquire_n > MAX_REACQUIRE:
-            self._fail(f"through failed after {MAX_REACQUIRE} corridor reacquires ({reason})")
+            self._soft_fail(f"through failed after {MAX_REACQUIRE} corridor reacquires ({reason})")
             return
         self._clear_pass()
         if self._center is None:
@@ -667,13 +698,14 @@ class UdroneHoopController(UdroneHelixController):
             self._des = None
             print(f"HOOP_REACQUIRE search (no centre) n={self._reacquire_n} {reason}", flush=True)
             return
-        corr = hoop_corridor(pos, self._center, self._axis, prev_phase=None)
+        corr = hoop_corridor(
+            pos, self._center, self._axis, prev_phase=None, through=self._axis,
+        )
         self._corridor = corr
-        self._axis = corr["through"]
         self._exit = corr["exit"]
         self.stage = "approach"
-        self._des = corr["approach"]
-        self._vel = (0.0, 0.0, 0.0)
+        self.yaw_hold = None
+        self._track_mode = None
         self._through_t0 = None
         self._through_seen = None
         self._through_blind_logged = False
@@ -690,6 +722,7 @@ class UdroneHoopController(UdroneHelixController):
             f"why={reason}",
             flush=True,
         )
+        self._apply_track(pos)
 
     def _enter_through(self, tm, pos, corr):
         """Gate on-axis — latch a world exit behind the ring and punch open-loop.
@@ -729,11 +762,20 @@ class UdroneHoopController(UdroneHelixController):
         )
 
     def _punch_vel(self, pos, ax):
-        """Open-loop surge along the frozen axis, with climb bias if still deep."""
-        vx = PUNCH_SPEED * float(ax[0])
-        vy = PUNCH_SPEED * float(ax[1])
-        vz = PUNCH_SPEED * float(ax[2])
+        """Surge along the frozen axis. Speed falls to zero at the exit.
+
+        A constant 0.6 m/s is faster than the position loop can cancel, so
+        the hull kept going after the exit. Climb bias only while still short.
+        """
+        along = 0.0
         if self._exit is not None:
+            delta = tuple(float(self._exit[i]) - float(pos[i]) for i in range(3))
+            along = sum(delta[i] * float(ax[i]) for i in range(3))
+        speed = surge_speed(along, PUNCH_SPEED, taper_m=1.0)
+        vx = speed * float(ax[0])
+        vy = speed * float(ax[1])
+        vz = speed * float(ax[2])
+        if self._exit is not None and along > 0.0:
             dz = float(self._exit[2]) - float(pos[2])  # + = need to climb (ENU)
             if dz > 0.12:
                 vz = max(vz, min(PUNCH_CLIMB_MPS, 0.8 * dz))
@@ -741,23 +783,21 @@ class UdroneHoopController(UdroneHelixController):
                 vz = min(vz, max(-PUNCH_CLIMB_MPS, 0.8 * dz))
         return (vx, vy, vz)
 
-    def _punch_ready(self, pos, corr) -> bool:
-        """Horizontal and depth errors each inside 0.15 m. Combined lat does not count."""
-        del pos
-        return punch_centered(corr["y"], corr["z"])
-
     def _hold_gate(self, pos, corr):
-        """Last metre, not yet centered: chase the gate with the nose free."""
+        """Last metre, not yet centered: stop on the gate with the nose free.
+
+        Along-track feedforward here is what carried the hull through the
+        ring. The position loop closes the gate on its own.
+        """
         entered = self.stage != "center"
         self.stage = "center"
         gate = tuple(float(c) for c in corr["gate"])
         self._des = gate
-        th = corr["through"]
         dz = float(gate[2]) - float(pos[2])
         vz = 0.0
         if abs(dz) > 0.08:
             vz = max(-PUNCH_CLIMB_MPS, min(PUNCH_CLIMB_MPS, 0.7 * dz))
-        self._vel = (SPEED * float(th[0]), SPEED * float(th[1]), vz)
+        self._vel = (0.0, 0.0, vz)
         self.yaw_hold = None
         self.pitch_limit = APPROACH_PITCH_RAD
         self._sweep_world = [pos, gate]
@@ -769,54 +809,201 @@ class UdroneHoopController(UdroneHelixController):
                 flush=True,
             )
 
-    def _update_corridor(self, tm, pos):
-        """Advance approach → commit → open-loop through along the locked glide path."""
+    def _shallow(self, pos, z_des) -> bool:
+        """True when the hull is shallower than the ring setpoint."""
+        return float(pos[2]) - float(z_des) >= DIVE_DEPTH_ERR_M
+
+    def _approach_vel(self, pos, station):
+        """Downward feedforward while joining the station. No along-track surge yet."""
+        dz = float(station[2]) - float(pos[2])
+        if abs(dz) <= DIVE_DEPTH_ERR_M:
+            return (0.0, 0.0, 0.0)
+        vz = max(-DIVE_VZ_MPS, min(DIVE_VZ_MPS, 0.7 * dz))
+        return (0.0, 0.0, vz)
+
+    def _lead_command(self, pos, corr):
+        """Setpoint a short lead ahead on the station→gate centreline, at cruise speed."""
+        point, _s_cmd, _lead = corridor_lead_point(
+            corr["approach"], corr["gate"], corr["s_prog"], corr["length_m"],
+            speed_mps=SPEED, lead_s=GLIDE_LEAD_S,
+        )
+        th = corr["through"]
+        vz = 0.0
+        dz = float(point[2]) - float(pos[2])
+        if abs(dz) > 0.12:
+            vz = max(-0.25, min(0.25, 0.7 * dz))
+        vel = (SPEED * float(th[0]), SPEED * float(th[1]), vz)
+        return point, vel
+
+    def _corridor_yaw(self, pos, corr, *, on_glide: bool):
+        """Free the nose until the hull is on the station and at ring depth.
+
+        Yaw lock throws away lateral force. Off the tube, or still shallow,
+        the nose has to point at the setpoint or a north/south start never
+        reaches the line.
+        """
+        z_des = float(corr["gate"][2])
+        near_station = float(corr["dist_approach"]) <= STATION_LOCK_M
+        # Lock only once the hull is actually on the centreline. A wide
+        # "near the station" ball still has to steer, and yaw lock cannot.
+        on_line = (
+            not self._shallow(pos, z_des)
+            and abs(float(corr["y"])) <= 0.32
+        )
+        if on_line and (on_glide or near_station):
+            th = corr["through"]
+            self.yaw_hold = math.atan2(float(th[1]), float(th[0]))
+        else:
+            self.yaw_hold = None
+        self.pitch_limit = APPROACH_PITCH_RAD
+
+    def _apply_track(self, pos):
+        """Pursuit reference: dive, join the centreline, cruise, brake at the exit.
+
+        The nose stays free so the force can point along that curve. Yaw lock
+        would throw the lateral part away.
+        """
         if self._center is None:
             return
-        corr = hoop_corridor(
-            pos, self._center, self._axis, prev_phase=self._corridor_prev(),
+        guidance_center = self._guidance_center()
+        step = hoop_mpc.plan(
+            pos, guidance_center, self._axis or HOOP_AXIS,
+            speed_mps=SPEED, exit_m=EXIT_M, v_state=self.vel,
         )
-        self._corridor = corr
-        # Do not refresh axis/exit once through has latched the punch target.
-        if self.stage != "through":
-            self._axis = corr["through"]
-            self._exit = corr["exit"]
-        phase = corr["phase"]
-        near = phase == "through" or (
-            phase == "commit" and float(corr["dist_gate"]) <= OPEN_LOOP_M
-        )
-        if near and self._punch_ready(pos, corr):
-            self._enter_through(tm, pos, corr)
-            return
-        if near:
-            self._hold_gate(pos, corr)
-            return
-        if phase in ("commit", "through"):
-            if self.stage != "commit":
-                print(
-                    f"HOOP_CORRIDOR commit "
-                    f"dist_gate={corr['dist_gate']:.2f} lat={corr['lat']:.2f} "
-                    f"half={corr['half_m']:.2f} "
-                    f"dz={float(pos[2]) - float(corr['gate'][2]):+.2f}",
-                    flush=True,
-                )
-            self.stage = "commit"
-            # Lead along the centreline toward the gate; bias depth onto the opening.
-            self._des = corr["gate"]
-            th = corr["through"]
-            vz = 0.32 * float(th[2]) if len(th) > 2 else 0.0
-            dz = float(corr["gate"][2]) - float(pos[2])
-            if abs(dz) > 0.12:
-                vz = max(-0.25, min(0.25, 0.7 * dz))
-            self._vel = (0.32 * float(th[0]), 0.32 * float(th[1]), vz)
+        self._des = step["point"]
+        self._vel = step["vel"]
+        self._acc = step.get("acc") or (0.0, 0.0, 0.0)
+        self._exit = step["exit"]
+        mode = step["mode"]
+        if mode != self._track_mode:
+            s0, y0, z0 = step["state0"]
+            print(
+                f"HOOP_TRACK mode={mode} s={s0:+.2f} y={y0:+.2f} z={z0:+.2f} "
+                f"v={math.hypot(*self._vel):.2f}",
+                flush=True,
+            )
+            self._track_mode = mode
+        s_miss, y_miss, _z_miss = step["state0"]
+        if float(s_miss) > hoop_mpc.MISS_S_M and self._plane is None and not self.failed:
+            self._start_goaround(self._tick_tm, pos, y_miss)
+            if self.stage == "goaround":
+                return
+        self.stage = {
+            "dive": "approach",
+            "join": "approach",
+            "center": "center",
+            "through": "commit",
+        }.get(mode, "approach")
+        # Short of the plane the nose follows the commanded horizontal vector,
+        # slewed. This preserves the planner's continuous lateral closure;
+        # the old axis-heading branch discarded it and toggled at |y|=0.40 m.
+        s0, y0, z0 = step["state0"]
+        fwd = step["fwd"]
+        vx, vy, vz = self._vel
+        vs = vx * fwd[0] + vy * fwd[1]
+        speed_h = math.hypot(vx, vy)
+        target = None
+        speed = None
+        if float(s0) < 0.0:
+            axis_yaw = math.atan2(float(fwd[1]), float(fwd[0]))
+            if speed_h > 0.02:
+                raw = math.atan2(vy, vx)
+                offset = (raw - axis_yaw + math.pi) % (2.0 * math.pi) - math.pi
+                offset = max(math.radians(-55.0), min(math.radians(55.0), offset))
+                target = axis_yaw + offset
+                speed = speed_h
+            else:
+                target = axis_yaw
+                speed = 0.0
+        if target is None:
+            self.yaw_hold = None
         else:
-            self.stage = "approach"
-            self._des = corr["approach"]
-            self._vel = (0.0, 0.0, 0.0)
-        self._sweep_world = [pos, corr["approach"], corr["gate"], self._exit]
-        # Yaw-hold the through axis once on the corridor.
-        self.yaw_hold = math.atan2(float(corr["through"][1]), float(corr["through"][0]))
-        self.pitch_limit = APPROACH_PITCH_RAD
+            self.yaw_hold = self._hold_yaw(target, self._slew_arm)
+            self._vel = (
+                speed * math.cos(self.yaw_hold),
+                speed * math.sin(self.yaw_hold),
+                vz,
+            )
+        # Same curve the planner used for the cone, so the nose and the
+        # command open together as the depth error grows.
+        self.pitch_limit = hoop_mpc.pitch_limit_rad(z0)
+        self._corridor = hoop_corridor(
+            pos, guidance_center, self._axis,
+            prev_phase=self._corridor_prev(),
+            through=self._axis,
+        )
+        self._sweep_world = [pos, self._des, self._exit]
+
+    def _soft_fail(self, why: str):
+        """The pass failed but the vehicle is fine.
+
+        Under a plan that continues (``UDRONE_HOOP_FAIL_HOLD``), finish armed
+        so the base hands the vehicle to the hold runner for the next step.
+        Otherwise disarm as before.
+        """
+        if self._fail_hold and self.keep_armed:
+            print(f"FAIL {why} (holding armed for the next step)", flush=True)
+            self.failed = why
+            self._held = True
+            return
+        self._fail(why)
+
+    def _start_goaround(self, tm, pos, y0):
+        """Past the plane with no opening sample: loop beside the ring and retry.
+
+        Backing straight up the axis would hit the ring, and waiting at the
+        exit only runs out the budget.
+        """
+        self._reacquire_n += 1
+        if self._reacquire_n > MAX_REACQUIRE:
+            self._soft_fail(f"missed the opening {MAX_REACQUIRE} times")
+            return
+        axis = self._axis or HOOP_AXIS
+        center = self._center or HOOP_CENTER
+        fwd, left, up = hoop_mpc.hoop_axes(axis)
+        side = 1.0 if float(y0) >= 0.0 else -1.0
+        s_now = max(hoop_mpc.MISS_S_M, hoop_mpc.hoop_state(pos, center, axis)[0])
+        world = [
+            tuple(float(p) for p in pos),
+            hoop_mpc._world(center, fwd, left, up, s_now, side * GOAROUND_SIDE_M, 0.0),
+            hoop_mpc._world(center, fwd, left, up, -GOAROUND_BACK_M, side * GOAROUND_SIDE_M, 0.0),
+            hoop_mpc._world(center, fwd, left, up, -GOAROUND_BACK_M, 0.0, 0.0),
+        ]
+        self._ga_wps = [self._path_of(p) for p in world]
+        self._ga_end = world[-1]
+        self._ga_t0 = float(tm)
+        length = path_length_3d(self._ga_wps)
+        self._ga_time = length / GOAROUND_MPS
+        self._search_extra += self._ga_time + 30.0
+        self._clear_pass()
+        self.stage = "goaround"
+        self._track_mode = None
+        self._sweep_world = list(world)
+        print(
+            f"HOOP_GOAROUND n={self._reacquire_n}/{MAX_REACQUIRE} side={side:+.0f} "
+            f"len={length:.1f} m",
+            flush=True,
+        )
+
+    def _goaround_tick(self, tm, pos):
+        """Nose along the loop; back into the corridor at the approach station."""
+        ref = polyline_pos_vel(self._ga_wps, GOAROUND_MPS, max(0.0, tm - self._ga_t0))
+        v_fwd, v_left = ref[1][0], ref[1][1]
+        if math.hypot(v_fwd, v_left) > 0.05:
+            yaw0 = self.anchor[2]
+            self.yaw_hold = self._hold_yaw(math.atan2(v_left, v_fwd) + yaw0, tm)
+        center = self._center or HOOP_CENTER
+        self.pitch_limit = hoop_mpc.pitch_limit_rad(float(pos[2]) - float(center[2]))
+        if math.dist(pos, self._ga_end) < 0.7 or tm - self._ga_t0 > self._ga_time + 20.0:
+            self._enter_corridor(
+                tm, pos, center, self._axis or HOOP_AXIS,
+                why=f"go-around {self._reacquire_n}",
+            )
+
+    def _update_corridor(self, tm, pos):
+        """The through-direction stays at the value frozen on entry."""
+        del tm
+        self._apply_track(pos)
 
     def _des_helix(self):
         if self._des is None or self.anchor is None:
@@ -827,7 +1014,9 @@ class UdroneHoopController(UdroneHelixController):
         c, s = math.cos(yaw0), math.sin(yaw0)
         vx, vy, vz = self._vel
         path_v = (c * vx + s * vy, -s * vx + c * vy, vz)
-        return (fwd, left, self._des[2]), path_v
+        ax, ay, az = self._acc if self._acc is not None else (0.0, 0.0, 0.0)
+        path_a = (c * ax + s * ay, -s * ax + c * ay, az)
+        return (fwd, left, self._des[2]), path_v, path_a
 
     def _step_mpc(self, pos, tm=None):
         """Receding hoop-axis tube setpoint for the force loop."""
@@ -861,6 +1050,38 @@ class UdroneHoopController(UdroneHelixController):
             )
 
     def _helix(self, tm: float):
+        ref = self._helix_raw(tm)
+        # The HUD previews _helix at future times, and again at this tm.
+        # Only the live control sample may advance the slew.
+        if self._slew_arm != tm or self._slew_tm == tm:
+            return ref
+        self._slew_tm = tm
+        return self._slew(ref, tm)
+
+    def _slew(self, ref, tm):
+        """Rate-limit the velocity the force loop will track."""
+        pos, vel = ref[0], ref[1]
+        dt = 0.05
+        if self._slew_prev_tm is not None:
+            dt = float(tm) - self._slew_prev_tm
+        self._slew_prev_tm = float(tm)
+        new_v, acc = hoop_mpc.slew_velocity(self._slew_v, vel, dt)
+        self._slew_v = new_v
+        return pos, new_v, acc
+
+    def _hold_yaw(self, target, tm) -> float:
+        """Slew the held heading so a new bearing does not snap the nose."""
+        dt = 0.05
+        if self._yaw_tm is not None and tm is not None:
+            dt = float(tm) - float(self._yaw_tm)
+        if tm is not None:
+            self._yaw_tm = float(tm)
+        self._yaw_cmd = slew_angle(self._yaw_cmd, target, dt, rate=0.45)
+        return self._yaw_cmd
+
+    def _helix_raw(self, tm: float):
+        if self.stage == "goaround" and self._ga_wps and self._ga_t0 is not None:
+            return polyline_pos_vel(self._ga_wps, GOAROUND_MPS, max(0.0, tm - self._ga_t0))
         if self.stage in ("approach", "commit", "reacquire", "center", "through"):
             return self._des_helix()
         if self._tracking and self._approach_wps and self._approach_t0 is not None:
@@ -870,6 +1091,38 @@ class UdroneHoopController(UdroneHelixController):
         if self._tracking and self._approach is not None and self.anchor is not None:
             return self._path_of(self._approach), (0.0, 0.0, 0.0)
         if self._search_wps and self._leg_t0 is not None:
+            # Finish the dive before the leg walks forward. A time-based
+            # polyline otherwise moves sideways while the hull is still shallow
+            # and the nose pitches through the ring.
+            z_now = self._prev[1][2] if self._prev else 0.0
+            hold, self._leg_held_deep, self._leg_t0, self._leg_shallow_t = leg_clock(
+                z_now, SEARCH_Z, 0.40, self._leg_held_deep, self._leg_t0, tm,
+                self._leg_shallow_t,
+            )
+            if hold:
+                # Nose-down glide toward the active leg while depth closes.
+                # Pure vertical thrust is impossible on this body-x-only hull;
+                # extending it caused 6.6 m of uncontrolled horizontal drift.
+                if self.anchor is not None and self._prev is not None:
+                    hx, hy = self._path_xy(self._prev[1][0], self._prev[1][1])
+                    return hoop_mpc.search_glide_reference(
+                        (hx, hy, z_now), self._search_wps[-1], SEARCH_Z,
+                        max_vz=DIVE_VZ_MPS,
+                    )
+                return self._search_wps[0], (0.0, 0.0, 0.0)
+            if not self._leg_rebased and self._prev is not None:
+                # Begin the timed leg exactly where the glide ended. The old
+                # polyline still began at the arm pose and made a 2.61 m jump.
+                hx, hy = self._path_xy(self._prev[1][0], self._prev[1][1])
+                self._search_wps = [
+                    (hx, hy, float(z_now)),
+                    self._search_wps[-1],
+                ]
+                self._leg_t0 = float(tm)
+                self._leg_rebased = True
+                length = path_length_3d(self._search_wps)
+                self._leg_time = length / SPEED
+                self._leg_limit = max(8.0, self._leg_time + 18.0)
             return polyline_pos_vel(self._search_wps, SPEED, max(0.0, tm - self._leg_t0))
         return (0.0, 0.0, SEARCH_Z), (0.0, 0.0, 0.0)
 
@@ -895,6 +1148,9 @@ class UdroneHoopController(UdroneHelixController):
         self._goal_cell = cell
         self._goal_xy = (ce, cn)
         self._leg_t0 = tm
+        self._leg_held_deep = False
+        self._leg_shallow_t = None
+        self._leg_rebased = False
         length = path_length_3d(self._search_wps)
         self._leg_time = length / SPEED
         self._leg_limit = max(8.0, self._leg_time + 18.0)
@@ -944,6 +1200,7 @@ class UdroneHoopController(UdroneHelixController):
         ]
         self._search_end = target
         self._leg_t0 = tm
+        self._leg_rebased = False
         length = path_length_3d(self._search_wps)
         self._leg_time = length / max(SPEED, 0.05)
         self._leg_limit = max(6.0, self._leg_time + 8.0)
@@ -1047,6 +1304,7 @@ class UdroneHoopController(UdroneHelixController):
                 self._center, self._axis, vehicle=pos,
                 in_funnel=bool(corr and corr.get("in_funnel")),
                 through_ok=bool(self._crossed or self.stage == "through"),
+                through=self._axis,
             )
             out["paths"].extend(gp["paths"])
             out["markers"].extend(gp["markers"])
@@ -1102,6 +1360,8 @@ class UdroneHoopController(UdroneHelixController):
         return cmd
 
     def _control(self, tm, auv, boat):
+        self._slew_arm = tm
+        self._tick_tm = float(tm)
         pos, q = auv
         self.yaw_hold = None
         if self._relock and self._search_end is not None:
@@ -1109,6 +1369,13 @@ class UdroneHoopController(UdroneHelixController):
             dy = self._search_end[1] - pos[1]
             if math.hypot(dx, dy) > 0.60:
                 self.yaw_hold = math.atan2(dy, dx)
+        elif self.stage == "search" and self._search_end is not None:
+            # Point along the leg for the whole dive, so the nose does not
+            # follow a sideways correction.
+            dx = self._search_end[0] - pos[0]
+            dy = self._search_end[1] - pos[1]
+            if math.hypot(dx, dy) > 0.40:
+                self.yaw_hold = self._hold_yaw(math.atan2(dy, dx), tm)
         if pos[2] < HOOP_FLOOR:
             # Climbing from a deep prior leg (e.g. bed-tag approach) is allowed;
             # only fail if we stay deep without rising toward the ring band.
@@ -1126,8 +1393,13 @@ class UdroneHoopController(UdroneHelixController):
         else:
             self._deep_t = None
         self._note_real(tm, pos)
-        if self.stage in ("approach", "commit", "reacquire", "center"):
+        if self.stage == "goaround":
             hit = self._sight(tm, pos, q)
+            self._goaround_tick(tm, pos)
+            return self._act(tm, auv, boat, hit)
+        if self.stage in ("approach", "commit", "reacquire", "center", "through"):
+            hit = self._sight(tm, pos, q)
+            self._update_visual_trim(hit)
             if hit is not None and hit.get("closed") and "center" in hit:
                 self._last_hit_t = tm
                 self._last_center = hit["center"]
@@ -1163,24 +1435,37 @@ class UdroneHoopController(UdroneHelixController):
             return self._act(tm, auv, boat, hit)
 
         hit = self._sight(tm, pos, q)
+        self._update_visual_trim(hit)
         if hit is not None:
             self._note_slide(pos, hit)
-        usable = (
+        # Any closed detection of the authored ring starts the corridor,
+        # including inside 1.6 m where the old commit gate had already given
+        # up. Do not keep the vision lead on that frame — its endpoint walks
+        # through and below the opening.
+        lock_match = (
             hit is not None
-            and hit["closed"]
-            and hit["aspect"] >= 0.50
-            and 1.6 <= hit["z_opt"] <= 10.0
+            and hit.get("closed")
             and "center" in hit
-            and HOOP_FLOOR <= hit["center"][2] <= -0.35
+            and authored_ring_lock(hit["center"])
         )
-        if usable:
-            self._last_hit_t = tm
-            self._last_center = hit["center"]
-            self._relock = False
-            self._commit(tm, pos, hit)
-            if self.stage == "through":
-                return self._act(tm, auv, boat, hit)
-            self._track(tm, pos, hit)
+        if lock_match:
+            if self._sight_new:
+                self._lock_hits += 1
+            if self._lock_hits >= LOCK_FRAMES and self.anchor is not None:
+                self._fix_samples.clear()
+                self._enter_corridor(
+                    tm, pos, HOOP_CENTER, HOOP_AXIS,
+                    why=f"authored lock ({LOCK_FRAMES} frames)",
+                )
+            return self._act(tm, auv, boat, hit)
+        if self._sight_new:
+            self._lock_hits = 0
+        if hit is not None and hit.get("closed"):
+            # Not the authored hoop. Do not aim at this vision centre: the
+            # median used to start a corridor through and below the opening.
+            self._steer(tm, pos, rpy_from_q(q)[2])
+            if self.failed or self.done:
+                return self._act(tm, auv, boat, hit, (0.0, 0.0, 0.0, 0.0))
             return self._act(tm, auv, boat, hit)
         # Near a known centre: hold the opening axis. Do not align toward
         # orange arcs — that steers the nose onto the rim in the last metres.
@@ -1234,8 +1519,10 @@ class UdroneHoopController(UdroneHelixController):
             pos = self._prev[1]
         exit_miss = None
         if pos is not None and self._exit is not None:
-            exit_miss = math.dist(pos, self._exit)
-            self._miss = exit_miss
+            dist = math.dist(pos, self._exit)
+            if dist < self._miss:
+                self._miss = dist
+            exit_miss = self._miss
         elif math.isfinite(self._miss):
             exit_miss = self._miss
         frame = None
@@ -1278,6 +1565,7 @@ class UdroneHoopController(UdroneHelixController):
             "real_crossed": bool(self._real_crossed),
             "vision_crossed": bool(self._crossed),
             "real_miss_m": _num(self._real_miss),
+            "held": bool(self._held),
         }
 
     def _log_stop(self, verdict: dict):
@@ -1312,13 +1600,13 @@ class UdroneHoopController(UdroneHelixController):
         if self.stage == "search":
             deadline = SEARCH_BUDGET_S + self._search_extra
             if tm >= deadline:
-                self._fail(f"hoop not found in {deadline:.0f}s")
+                self._soft_fail(f"hoop not found in {deadline:.0f}s")
                 return True
             return False
-        if self.stage in ("approach", "commit", "reacquire", "center"):
+        if self.stage in ("approach", "commit", "reacquire", "center", "goaround"):
             deadline = SEARCH_BUDGET_S + THROUGH_BUDGET_S + self._search_extra
             if tm >= deadline:
-                self._fail(verdict["why"])
+                self._soft_fail(verdict["why"])
                 return True
             return False
         elapsed = tm - (self._through_t0 or tm)
@@ -1326,7 +1614,7 @@ class UdroneHoopController(UdroneHelixController):
             if self._reacquire_n < MAX_REACQUIRE and pos is not None:
                 self._reacquire_corridor(tm, pos, verdict["why"])
                 return False
-            self._fail(verdict["why"])
+            self._soft_fail(verdict["why"])
             return True
         return False
 

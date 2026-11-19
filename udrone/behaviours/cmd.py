@@ -35,8 +35,8 @@ EVT = "/coral/event"
 STS = "/coral/status"
 TERMINAL = {
     "arrived", "dock_done", "helix_done", "shape_done", "swim_done", "hoop_done", "track_done",
-    "rendezvous_done", "coverage_done", "approach_done", "survey_done", "failed", "rejected",
-    "aborted",
+    "search_otter_done", "rendezvous_done", "coverage_done", "approach_done", "survey_done",
+    "failed", "rejected", "aborted",
 }
 
 
@@ -338,8 +338,8 @@ def main(argv=None):
     if terminal.get("type") in ("failed", "rejected"):
         ok = False
     if terminal.get("type") in (
-        "helix_done", "swim_done", "hoop_done", "track_done", "rendezvous_done",
-        "coverage_done", "approach_done",
+        "helix_done", "shape_done", "swim_done", "hoop_done", "track_done",
+        "search_otter_done", "rendezvous_done", "coverage_done", "approach_done",
     ) and terminal.get("failed"):
         ok = False
     if terminal.get("type") == "approach_done" and not terminal.get("arrived", True):

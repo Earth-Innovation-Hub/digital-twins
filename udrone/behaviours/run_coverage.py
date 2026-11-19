@@ -184,8 +184,17 @@ class UdroneCoverageController(UdroneHelixController):
         if not self._built:
             return False
         # Finish a few seconds after the end of the polyline (hold last point).
-        # The reference clock waits for the hull, so the cap is on thrust time.
-        return self.path_t >= self._path_time + 3.0 or tm >= self.duration_s
+        if self.path_t >= self._path_time + 3.0:
+            return True
+        # Wall-clock timeout with an incomplete path is a failure, not PASS.
+        if tm >= self.duration_s:
+            if self.path_t < self._path_time:
+                self._fail(
+                    f"coverage timeout at {tm:.1f}s "
+                    f"(path {self.path_t:.1f}/{self._path_time:.1f}s)"
+                )
+            return True
+        return False
 
 
 def main():

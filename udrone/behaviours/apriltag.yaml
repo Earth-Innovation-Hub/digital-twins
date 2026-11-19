@@ -1,11 +1,16 @@
 # apriltag_ros on otter_k / xudrone cameras (Locutus twin.launch pattern).
 # Tags: 36h11, 0.40 m. Id 0 is the cube at ENU (5, 4). Id 10 is the tag
 # centered on the underside of the Heron deck. One size fits both.
+# Ids 11 and 12 are the 0.24 m tags on the Heron pontoon sterns; they get
+# their own size so their TF range is right.
 /**:
   ros__parameters:
     image_transport: raw
     family: 36h11
     size: 0.4
+    tag:
+      ids: [11, 12]
+      sizes: [0.24, 0.24]
     max_hamming: 0
     qos_profile: default
     detector:

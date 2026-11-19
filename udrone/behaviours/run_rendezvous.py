@@ -5,8 +5,13 @@ Geometry (see rendezvous_geom): nest at the Heron origin (between the
 pontoons); continuous ILS-style glide from a deep aft tip up into the weld
 standoff on boat −Z; hull plates parallel for ATTACH.
 
-Default path: deep aft tip → climb the tapering glide (up-cam AprilTag 10
-locks early under nose-down surge) → flare → nest-frame dock MPC latch.
+Default path: deep aft tip → climb the tapering glide → flare → fly-through
+capture on the boat centreline, 0.25 m below the nest; ATTACH fires from any
+stage once the hull is inside the weld gate. A capture that passes the nest
+goes around to the tip. The front camera's view of tags 10 / 11 / 12
+(``boat_fix``) corrects the boat position the guidance flies on; the fix is
+held through the last metre, where no camera sees a tag.
+``UDRONE_RDV_TERMINAL=mpc`` restores the old latch station + dock MPC.
 A lost deck tag holds the last fix then rejoins the glide. After
 ``search_otter``, warm-starts mid-glide (skips cold tip). Phrase:
 ``xudrone, rendezvous and dock with otter_k``.
@@ -15,6 +20,7 @@ from __future__ import annotations
 
 import math
 import os
+import random
 import subprocess
 import sys
 import time
@@ -25,34 +31,43 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo
+from tf2_msgs.msg import TFMessage
 
 try:
     from apriltag_msgs.msg import AprilTagDetectionArray
 except ImportError:
     AprilTagDetectionArray = None
 
-from patterns import world_offset_to_path
+from patterns import world_offset_to_path, slew_angle
 from servo_geom import phase, relock_leg
 import maneuver_power as mp
 import dock_mpc
+from boat_fix import BoatFix
 from rendezvous_geom import (
     AFT_ARRIVE_M,
     AFT_STANDOFF_M,
     ATTACH_DIST_M,
+    CAPTURE_ALONG_M,
+    CAPTURE_HEADING_OFF,
+    CAPTURE_MISS_FWD_M,
+    CAPTURE_MPS,
     CONE_EXIT,
     CONE_HALF,
     CONE_RANGE_M,
     DOCK_CLIMB_MPS,
     DOCK_STANDOFF_M,
     GLIDE_FLARE_S,
+    GLIDE_HEADING_OFF,
     GLIDE_LATCH_S,
     LAND_RANGE_M,
     LEARNED_BLEND,
     LEARNED_CHASE_MPS,
     LEARNED_CLOSE_RATE,
     SERVO_LOCK_CAP_M,
-    UNDER_SPIRAL_R0_M,
-    UNDER_SPIRAL_R_MAX_M,
+    axes,
+    capture_missed,
+    capture_reference,
+    centreline_heading,
     closing_range,
     cone_rim,
     cone_state,
@@ -61,10 +76,10 @@ from rendezvous_geom import (
     glide_corridor,
     glide_path,
     glide_station,
+    nest_body_offset,
     pull_to_nest_axis,
     servo_close_velocity,
     servo_station,
-    under_loiter_point,
 )
 from track_geom import (
     CAM_Z,
@@ -110,6 +125,42 @@ AFT_FAR_M = 12.0
 UNDER_HOLD_BEFORE_SPIRAL_S = 8.0
 # Lead the glide setpoint slightly ahead of projected s (seconds of look-ahead).
 GLIDE_LEAD_S = 0.35
+# Keep the moving reference local and acceleration bounded.  The hull is
+# underactuated; multi-metre position jumps become reverse-thrust turns.
+GLIDE_CARROT_M = 0.45
+GLIDE_LATERAL_K = 0.55
+GLIDE_LATERAL_D = 0.35
+GLIDE_LATERAL_V_MAX = 0.18
+REFERENCE_ACCEL_MPS2 = 0.25
+# Capture the nest axis before climbing the final few decimetres.
+LATCH_CENTER_M = 0.10
+LATCH_CAPTURE_ALONG_M = 0.65
+# Boat tags logged per camera (VIS lines): deck 10, pontoon sterns 11 / 12.
+# Measurement only; guidance still uses tag 10 on the up camera.
+VIS_TAG_IDS = (10, 11, 12)
+VIS_LOG_S = 0.5
+TERMINAL_MPC = os.environ.get("UDRONE_RDV_TERMINAL", "flythrough").strip().lower() == "mpc"
+# Front-camera boat fix. Image-to-receipt delay used to look up the hull pose
+# the frame was taken from.
+FRONT_TF_TOPIC = os.environ.get("UDRONE_RDV_FRONT_TF", "/xudrone/tf_front")
+FRONT_LATENCY_S = float(os.environ.get("UDRONE_RDV_FRONT_LATENCY_S", "0.15"))
+USE_BOAT_FIX = os.environ.get("UDRONE_RDV_BOAT_FIX", "1") != "0"
+POSE_BUFFER_S = 1.0
+# Test hook: constant east,north bias on the boat prior (stands in for boat GNSS).
+_bias = [float(v) for v in os.environ.get("UDRONE_RDV_BOAT_BIAS", "0,0").split(",")[:2]]
+BOAT_BIAS = (_bias + [0.0, 0.0])[:2]
+# Centreline steering look-ahead (m) and lateral-rate damping (s).
+GLIDE_LOOKAHEAD_M = 1.4
+FLARE_LOOKAHEAD_M = 0.9
+CAPTURE_LOOKAHEAD_M = 0.7
+HEADING_DAMP_S = 0.8
+FLARE_HEADING_OFF = math.radians(25.0)
+CAPTURE_ENTRY_MPS = 0.25    # closing speed on the boat to start the capture
+CAPTURE_ENTRY_LAT_M = 0.45  # weld sphere is 0.55 m; lateral must already fit
+CAPTURE_PITCH_RAD = math.radians(20.0)
+CAPTURE_PITCH_BOOST_RAD = math.radians(10.0)   # LinkAttacher gate is 30 deg
+CAPTURE_MAX_S = 25.0
+MAX_GOAROUNDS = 3
 
 
 def _tag_side_px(corners) -> float:
@@ -163,6 +214,14 @@ class UdroneRendezvous(UdroneHelixController):
         self._corridor = None
         self._des = None
         self._vel = (0.0, 0.0, 0.0)
+        self._bearing = None
+        self._bearing_tm = None
+        self._transit_yaw = None
+        self._glide_s_max = 0.0
+        self._ref_rel_vel = (0.0, 0.0, 0.0)
+        self._ref_vel_tm = None
+        self._yaw_out = None
+        self._yaw_out_tm = None
         self._boat_vel = BaselineVelocity()
         self._boat = None
         self._auv_pos = None
@@ -184,6 +243,7 @@ class UdroneRendezvous(UdroneHelixController):
         self._mpc_warm = None
         self._mpc_rel_vel = None
         self._mpc_v_state = (0.0, 0.0, 0.0)  # lagged nest-frame vel for CEM plant
+        self._mpc_rng = random.Random()  # one stream; Random(0) each tick repeats
         self._acc = None
         self._servo_prev = None   # (tm, station) for d(station)/dt feedforward
         self._under_hold_t0 = None
@@ -198,14 +258,86 @@ class UdroneRendezvous(UdroneHelixController):
         info = os.environ.get("UDRONE_RENDEZVOUS_INFO", "/xudrone/camera_up/camera_info")
         dets = os.environ.get("UDRONE_RENDEZVOUS_DET", "/xudrone/detections_up")
         self.create_subscription(CameraInfo, info, self._on_info, qos_profile_sensor_data)
+        self._vis = {}            # (camera, id) -> [frames, side px, cx, cy]
+        self._vis_t = 0.0
+        self._boat_fix = BoatFix()
+        self._boat_truth = None
+        self._boat_prior = None
+        self._capture_yaw = None
+        self._pose_buf = []       # (wall time, pos, q) for frame-time lookup
+        self._front_frame = None  # (wall time, [(id, optical xyz)])
+        self._capture_t0 = None
+        self._goarounds = 0
+        self._weld_any_tm = None
+        front = os.environ.get("UDRONE_RENDEZVOUS_FRONT_DET", "/xudrone/detections")
+        if USE_BOAT_FIX:
+            self.create_subscription(TFMessage, FRONT_TF_TOPIC, self._on_front_tf, 20)
         if AprilTagDetectionArray is not None:
             self.create_subscription(
                 AprilTagDetectionArray, dets, self._on_tag, qos_profile_sensor_data,
+            )
+            self.create_subscription(
+                AprilTagDetectionArray, front,
+                lambda m: self._note_vis("front", m), qos_profile_sensor_data,
             )
         self.get_logger().info(
             f"rendezvous otter_k: deck_tag={self.tag_id} (up-cam) "
             f"budget={self._fail_budget_s:g}s (base={self.budget_s:g}s)"
         )
+        self.get_logger().info(
+            f"rendezvous terminal={'mpc' if TERMINAL_MPC else 'flythrough'} "
+            f"boat_fix={'front tags 10/11/12' if USE_BOAT_FIX else 'off'} "
+            f"bias=({BOAT_BIAS[0]:+.2f},{BOAT_BIAS[1]:+.2f})"
+        )
+
+    def _on_front_tf(self, m):
+        """Front-camera tag poses (optical frame) from apriltag_ros."""
+        now = time.time()
+        seen = []
+        for tr in m.transforms:
+            name = tr.child_frame_id
+            if not name.startswith("tag36h11:"):
+                continue
+            try:
+                tid = int(name.split(":", 1)[1])
+            except ValueError:
+                continue
+            if tid in VIS_TAG_IDS:
+                t = tr.transform.translation
+                seen.append((tid, (float(t.x), float(t.y), float(t.z))))
+        if not seen:
+            return
+        # apriltag_ros sends one TFMessage per frame; merge a split frame.
+        prev = self._front_frame
+        if prev is not None and now - prev[0] < 0.05:
+            ids = {s[0] for s in seen}
+            seen += [s for s in prev[1] if s[0] not in ids]
+        self._front_frame = (now, seen)
+
+    def _pose_at(self, t):
+        best = None
+        for rec in self._pose_buf:
+            if best is None or abs(rec[0] - t) < abs(best[0] - t):
+                best = rec
+        return best
+
+    def _boat_estimate(self, tm, auv, boat_truth):
+        """Boat pose the guidance flies on: prior (+ test bias) + front-camera offset."""
+        now = time.time()
+        self._boat_truth = boat_truth
+        self._pose_buf.append((now, auv[0], auv[1]))
+        while self._pose_buf and now - self._pose_buf[0][0] > POSE_BUFFER_S:
+            self._pose_buf.pop(0)
+        bp, bq = boat_truth
+        prior = (float(bp[0]) + BOAT_BIAS[0], float(bp[1]) + BOAT_BIAS[1], float(bp[2]))
+        self._boat_prior = prior
+        frame = self._front_frame
+        if USE_BOAT_FIX and frame is not None:
+            self._front_frame = None
+            rec = self._pose_at(frame[0] - FRONT_LATENCY_S)
+            if rec is not None:
+                self._boat_fix.update(tm, frame[1], rec[1], rec[2], prior, bq)
+        return self._boat_fix.apply(prior), bq
 
     def _on_info(self, m: CameraInfo):
         k = list(m.k)
@@ -214,8 +346,52 @@ class UdroneRendezvous(UdroneHelixController):
             self.cx = float(k[2]) or self.cx
             self.cy = float(k[5]) or self.cy
 
+    def _note_vis(self, cam, m):
+        """Count which boat tags a camera decoded since the last VIS line."""
+        for d in m.detections:
+            tid = int(d.id)
+            if tid not in VIS_TAG_IDS:
+                continue
+            rec = self._vis.setdefault((cam, tid), [0, 0.0, 0.0, 0.0])
+            rec[0] += 1
+            rec[1] = _tag_side_px(d.corners)
+            rec[2], rec[3] = float(d.centre.x), float(d.centre.y)
+
+    def _log_vis(self, cone):
+        now = time.time()
+        if now < self._vis_t:
+            return
+        self._vis_t = now + VIS_LOG_S
+        seen = " ".join(
+            f"{cam}:{tid}={rec[1]:.0f}px@({rec[2]:.0f},{rec[3]:.0f})x{rec[0]}"
+            for (cam, tid), rec in sorted(self._vis.items())
+        )
+        self._vis.clear()
+        corr = self._corridor or {}
+        s_txt = f"{corr['s']:.2f}" if "s" in corr else "-"
+        fix_txt = ""
+        bt, be = self._boat_truth, self._boat
+        if bt is not None and be is not None:
+            # Guidance boat position minus Gazebo truth, boat frame (fwd, left, up).
+            ef, el, eu = nest_body_offset(be[0], bt[0], bt[1])
+            bf = self._boat_fix
+            fix_txt = (
+                f" fix_err=({ef:+.2f},{el:+.2f},{eu:+.2f}) frames={bf.frames}"
+                f" tags={bf.last_tags}"
+            )
+            if bf.last_innovation is not None:
+                fix_txt += f" innov={bf.last_innovation:.2f}"
+        print(
+            f"VIS {self._stage} s={s_txt} range={cone['range']:.2f} "
+            f"lateral={cone['lateral']:.2f} along={cone['along']:.2f} "
+            f"yaw={math.degrees(cone['yaw']):+.0f} tilt={math.degrees(cone['tilt']):.0f}"
+            f"{fix_txt} | {seen or 'none'}",
+            flush=True,
+        )
+
     def _on_tag(self, m):
         """Deck underside tag (up-cam) — search / nest servo / dock."""
+        self._note_vis("up", m)
         best = None
         for d in m.detections:
             if int(d.id) == self.tag_id:
@@ -286,10 +462,20 @@ class UdroneRendezvous(UdroneHelixController):
             return "approach"
         return None
 
-    def _ready_to_dock(self):
+    def _ready_to_dock(self, cone=None):
         """Dock MPC / ATTACH once flared/latched with up-cam (or already docking)."""
-        if self._stage in ("latch", "dock"):
+        if self._stage == "dock":
             return True
+        if self._stage == "latch":
+            c = cone or {}
+            # The acceptance cone is intentionally broad for capture, but
+            # entering dock MPC at 0.3--0.4 m lateral locks yaw to the boat
+            # before a body-x-only hull can center.  Finish capture first.
+            return (
+                float(c.get("lateral", 99.0)) <= 0.12
+                and abs(float(c.get("yaw", math.pi))) <= math.radians(28.0)
+                and float(c.get("tilt", math.pi)) <= math.radians(35.0)
+            )
         if self._stage == "flare" and self._hits >= FOUND_HITS:
             return True
         # Legacy servo name still counts if a warm container maps it.
@@ -415,8 +601,17 @@ class UdroneRendezvous(UdroneHelixController):
 
     def _glide_setpoint(self, corr, auv_pose, boat, tm):
         """Lead along the glide centreline; blend toward tag when up-cam is fresh."""
-        s = float(corr["s"])
+        s_meas = float(corr["s"])
+        self._glide_s_max = max(self._glide_s_max, s_meas)
+        # Boat motion can move the projection slightly backwards.  Preserve
+        # progress, with only a tiny allowance for local tube recapture.
+        s = max(s_meas, self._glide_s_max - 0.02)
         speed = float(corr["speed_mps"])
+        half = max(0.05, float(corr.get("half_m", 0.5)))
+        lat = float(corr.get("lat", 0.0))
+        if lat > half:
+            # Spend thrust recapturing the tube instead of charging forward.
+            speed *= max(0.25, min(1.0, half / max(lat, 1e-3)))
         lead = min(0.15, GLIDE_LEAD_S * speed / max(0.2, corr["length_m"]))
         s_cmd = min(1.0, s + lead)
         st = glide_station(s_cmd, boat[0], boat[1])
@@ -424,6 +619,24 @@ class UdroneRendezvous(UdroneHelixController):
         tangent = corr["tangent"]
         rel_vel = tuple(speed * float(tangent[i]) for i in range(3))
         pos = auv_pose[0] if auv_pose is not None else self._auv_pos
+        # Damped vector-field capture of the local centreline.  This acts at
+        # the current glide progress; it never sends the hull back to the tip.
+        if pos is not None:
+            closest = corr.get("closest", glide_station(s, boat[0], boat[1])["point"])
+            lat_vec = tuple(float(pos[i]) - float(closest[i]) for i in range(3))
+            world_v = tuple(float(v) for v in getattr(self, "vel", (0.0, 0.0, 0.0)))
+            boat_v = tuple(float(v) for v in self._boat_vel.vel)
+            rel_meas = tuple(world_v[i] - boat_v[i] for i in range(3))
+            along_v = sum(rel_meas[i] * float(tangent[i]) for i in range(3))
+            lat_v = tuple(rel_meas[i] - along_v * float(tangent[i]) for i in range(3))
+            correction = tuple(
+                -GLIDE_LATERAL_K * lat_vec[i] - GLIDE_LATERAL_D * lat_v[i]
+                for i in range(3)
+            )
+            cn = math.sqrt(sum(c * c for c in correction))
+            if cn > GLIDE_LATERAL_V_MAX:
+                correction = tuple(c * GLIDE_LATERAL_V_MAX / cn for c in correction)
+            rel_vel = tuple(rel_vel[i] + correction[i] for i in range(3))
         # Early up-cam: soft-blend nest pull / servo station while still gliding.
         if (
             self._hits >= FOUND_HITS and self._fresh() and self._det is not None
@@ -470,9 +683,52 @@ class UdroneRendezvous(UdroneHelixController):
                     (1.0 - w_tag) * rel_vel[i] + w_tag * float(tag_v[i])
                     for i in range(3)
                 )
+        if pos is not None:
+            delta = tuple(float(point[i]) - float(pos[i]) for i in range(3))
+            dn = math.sqrt(sum(d * d for d in delta))
+            if dn > GLIDE_CARROT_M:
+                point = tuple(
+                    float(pos[i]) + delta[i] * GLIDE_CARROT_M / dn
+                    for i in range(3)
+                )
         dive = self._dive_rel_vel(pos, z_des=point[2])
         rel_vel = tuple(rel_vel[i] + dive[i] for i in range(3))
         return point, rel_vel
+
+    def _approach_transit(self, pos, tip, tm):
+        """Surge toward the glide tip with the nose held on that bearing.
+
+        The old command was the tip itself plus a pure dive. Horizontal motion
+        then came from the position correction, and the free nose followed
+        whichever way that small horizontal force pointed.
+        """
+        dx = float(tip[0]) - float(pos[0])
+        dy = float(tip[1]) - float(pos[1])
+        dist_h = math.hypot(dx, dy)
+        bearing = math.atan2(dy, dx) if dist_h >= 0.40 or self._bearing is None else self._bearing
+        dt = 0.05 if self._bearing_tm is None else float(tm) - float(self._bearing_tm)
+        self._bearing_tm = float(tm)
+        self._bearing = slew_angle(self._bearing, bearing, dt, rate=0.45)
+        yaw = self._bearing
+        vh = min(0.32, dist_h * 0.40)
+        vz = self._dive_rel_vel(pos, z_des=float(tip[2]))[2]
+        dz = float(tip[2]) - float(pos[2])
+        if abs(vz) < 1e-6 and dz > 0.15:
+            # Below the tip (e.g. leaving the hoop deep): climb in the
+            # velocity, not only through the position correction.
+            vz = min(0.28, 0.7 * dz)
+        # Never put the carrot past the tip.  Keep both horizontal and vertical
+        # references local: the old full-depth setpoint made the first error
+        # jump above 2 m and produced a 40 N launch impulse.
+        lead = min(dist_h, 0.65, max(0.25, dist_h * 0.25))
+        z_carrot = float(pos[2]) + max(-0.35, min(0.35, dz))
+        point = (
+            float(pos[0]) + lead * math.cos(yaw),
+            float(pos[1]) + lead * math.sin(yaw),
+            z_carrot,
+        )
+        self._transit_yaw = yaw
+        return point, (vh * math.cos(yaw), vh * math.sin(yaw), vz)
 
     def _corridor_goal(self, tm, boat, auv_pose=None):
         """Deep tip → continuous glide → flare hold; dark-tag spiral near tip."""
@@ -482,6 +738,27 @@ class UdroneRendezvous(UdroneHelixController):
         corr = glide_corridor(pos, boat[0], boat[1], prev_phase=self._corridor_prev())
         self._corridor = corr
         phase = corr["phase"]
+        if not TERMINAL_MPC:
+            if self._stage == "latch":
+                return self._capture_goal(tm, boat, corr)
+            f_h, l_h, _u = nest_body_offset(pos, boat[0], boat[1])
+            if self._stage in ("glide", "flare"):
+                if f_h > CAPTURE_MISS_FWD_M:
+                    return self._go_around(tm, boat, "overshot")
+                heading_ok = abs(float((self._cone or {}).get("yaw", 0.0))) <= math.radians(45.0)
+                # Enter only slow and near the line: at glide speed the hull
+                # crosses the weld sphere before the gate can hold.
+                if (
+                    heading_ok
+                    and (phase == "latch" or float(corr["s_raw"]) >= GLIDE_LATCH_S)
+                    and abs(l_h) <= CAPTURE_ENTRY_LAT_M
+                    and f_h <= 0.2
+                    and self._closing_rate(boat) <= CAPTURE_ENTRY_MPS
+                ):
+                    return self._capture_goal(tm, boat, corr)
+                if phase == "latch":
+                    # Not slow or centred enough yet: keep flying the flare.
+                    return self._glide_setpoint(corr, auv_pose, boat, tm)
         if phase == "approach":
             if self._stage != "approach":
                 self._stage = "approach"
@@ -493,7 +770,7 @@ class UdroneRendezvous(UdroneHelixController):
                     flush=True,
                 )
             tip = corr["tip"]
-            return tip, self._dive_rel_vel(pos, z_des=tip[2])
+            return self._approach_transit(pos, tip, tm)
         if phase == "glide":
             if self._stage != "glide":
                 self._stage = "glide"
@@ -514,30 +791,124 @@ class UdroneRendezvous(UdroneHelixController):
                 )
             return self._glide_setpoint(corr, auv_pose, boat, tm)
         # latch phase geometrically — hold threshold until dock MPC takes over.
-        if self._stage not in ("latch", "dock", "flare"):
+        if self._stage not in ("latch", "dock"):
             self._stage = "latch"
             print(
                 f"RENDEZVOUS_LATCH s={corr['s']:.2f} dist_thr={corr['dist_threshold']:.2f}",
                 flush=True,
             )
         thr = corr["threshold"]
-        if self._hits >= FOUND_HITS and self._fresh():
-            return thr, (0.0, 0.0, 0.0)
-        if self._under_hold_t0 is None:
-            self._under_hold_t0 = tm
-        if tm - self._under_hold_t0 < UNDER_HOLD_BEFORE_SPIRAL_S:
-            return thr, self._dive_rel_vel(pos, z_des=thr[2])
-        if self._search_t0 is None:
-            self._search_t0 = tm
-        z = float(thr[2]) - 0.15
-        pt = under_loiter_point(
-            corr["nest"], z, corr["fwd"], corr["left"], tm - self._search_t0,
-            r0=UNDER_SPIRAL_R0_M,
-            r_rate=self._spiral_grow * 0.5,
-            omega=self._spiral_omega,
-            r_max=UNDER_SPIRAL_R_MAX_M,
+        cone = self._cone or {}
+        lateral = float(cone.get("lateral", corr.get("lat", 0.0)))
+        along_live = max(DOCK_STANDOFF_M, float(cone.get("along", DOCK_STANDOFF_M)))
+        # Do not climb into the deck while still displaced sideways.  Blend
+        # continuously between a 0.65 m axis-capture station and the weld
+        # standoff, then let dock MPC take over once the cone is valid.
+        capture_w = max(
+            0.0,
+            min(1.0, (lateral - 0.04) / max(0.01, LATCH_CENTER_M - 0.04)),
         )
-        return pt, (0.0, 0.0, 0.0)
+        along_goal = DOCK_STANDOFF_M + capture_w * (
+            LATCH_CAPTURE_ALONG_M - DOCK_STANDOFF_M
+        )
+        along_goal = max(along_goal, min(along_live, LATCH_CAPTURE_ALONG_M) * capture_w)
+        nest = corr["nest"]
+        down = cone.get("down")
+        if down is None:
+            v = tuple(float(thr[i]) - float(nest[i]) for i in range(3))
+            vn = math.sqrt(sum(c * c for c in v)) or 1.0
+            down = tuple(c / vn for c in v)
+        point = tuple(float(nest[i]) + along_goal * float(down[i]) for i in range(3))
+        err = tuple(point[i] - float(pos[i]) for i in range(3))
+        rel_vel = tuple(0.55 * e for e in err)
+        vn = math.sqrt(sum(v * v for v in rel_vel))
+        vmax = 0.16 if lateral > LATCH_CENTER_M else 0.10
+        if vn > vmax:
+            rel_vel = tuple(v * vmax / vn for v in rel_vel)
+        return point, rel_vel
+
+    def _closing_rate(self, boat):
+        """Hull speed along the boat's heading, relative to the boat (m/s)."""
+        boat_v = self._boat_vel.vel
+        fwd = axes(boat[1])[0]
+        return sum((float(self.vel[i]) - float(boat_v[i])) * fwd[i] for i in range(2))
+
+    def _centreline_yaw(self, pos, boat, lookahead, max_off):
+        """Bounded heading onto the boat centreline, damped by the sideways rate."""
+        boat_v = self._boat_vel.vel
+        rel = tuple(float(self.vel[i]) - float(boat_v[i]) for i in range(2))
+        left = axes(boat[1])[1]
+        lat_rate = rel[0] * left[0] + rel[1] * left[1]
+        yaw, _l = centreline_heading(
+            pos, boat[0], boat[1], lookahead, max_off,
+            lat_rate=lat_rate, damp_s=HEADING_DAMP_S,
+        )
+        return yaw
+
+    def _capture_goal(self, tm, boat, corr):
+        """Fly through the weld sphere on the centreline; go around on a miss."""
+        pos = self._auv_pos
+        if self._stage != "latch" or self._capture_t0 is None:
+            self._stage = "latch"
+            self._capture_t0 = tm
+            f_h, l_h, u_h = nest_body_offset(pos, boat[0], boat[1])
+            print(
+                f"RENDEZVOUS_LATCH capture s={corr['s']:.2f} fwd={f_h:+.2f} "
+                f"left={l_h:+.2f} below={-u_h:.2f} dist_thr={corr['dist_threshold']:.2f}",
+                flush=True,
+            )
+        missed = capture_missed(pos, boat[0], boat[1])
+        if missed is None and self._capture_t0 is not None and tm - self._capture_t0 > CAPTURE_MAX_S:
+            missed = "slow"
+        if missed is not None:
+            return self._go_around(tm, boat, missed)
+        yaw = self._centreline_yaw(pos, boat, CAPTURE_LOOKAHEAD_M, CAPTURE_HEADING_OFF)
+        self._capture_yaw = yaw
+        return capture_reference(pos, boat[0], boat[1], yaw, speed=CAPTURE_MPS * self._power_scale())
+
+    def _power_scale(self):
+        return max(0.35, min(1.0, float(getattr(self, "power", 1.0) or 1.0)))
+
+    def _go_around(self, tm, boat, why):
+        f_h, l_h, u_h = nest_body_offset(self._auv_pos, boat[0], boat[1])
+        self._goarounds += 1
+        print(
+            f"RENDEZVOUS_GOAROUND #{self._goarounds} {why} fwd={f_h:+.2f} "
+            f"left={l_h:+.2f} below={-u_h:.2f}",
+            flush=True,
+        )
+        if self._goarounds > MAX_GOAROUNDS:
+            self._fail(f"missed the nest {self._goarounds} times ({why})")
+        self._stage = "approach"
+        self._capture_t0 = None
+        self._glide_s_max = 0.0
+        self._weld_any_tm = None
+        self._bearing = None
+        corr = glide_corridor(self._auv_pos, boat[0], boat[1], prev_phase="approach")
+        self._corridor = corr
+        return self._approach_transit(self._auv_pos, corr["tip"], tm)
+
+    def _slew_reference_velocity(self, tm, target):
+        """Acceleration-limit the nest-relative reference across all glide phases."""
+        target = tuple(float(v) for v in target)
+        if self._ref_vel_tm is None:
+            self._ref_vel_tm = float(tm)
+            # Start from rest after arming/hand-off.  Publishing the full
+            # 0.32/-0.28 m/s command on the first tick still made a ~42 N
+            # impulse even after the position carrot was shortened.
+            dt = 0.05
+        else:
+            dt = min(0.25, max(1e-3, float(tm) - self._ref_vel_tm))
+            self._ref_vel_tm = float(tm)
+        delta = tuple(target[i] - self._ref_rel_vel[i] for i in range(3))
+        dn = math.sqrt(sum(d * d for d in delta))
+        cap = REFERENCE_ACCEL_MPS2 * dt
+        if dn > cap > 0.0:
+            delta = tuple(d * cap / dn for d in delta)
+        new = tuple(self._ref_rel_vel[i] + delta[i] for i in range(3))
+        acc = tuple((new[i] - self._ref_rel_vel[i]) / dt for i in range(3))
+        self._ref_rel_vel = new
+        return new, acc
     def _servo_goal(self, tm, auv, boat):
         pos, q = auv
         tag = self._visual_tag(pos, q)
@@ -621,7 +992,7 @@ class UdroneRendezvous(UdroneHelixController):
         if self._dock_mpc and cone.get("pos") is not None:
             step = dock_mpc.plan(
                 cone, climb_mps=self._climb_mps, warm=self._mpc_warm,
-                v_state=self._mpc_v_state,
+                v_state=self._mpc_v_state, rng=self._mpc_rng, dt=dt,
             )
             point = step["point"]
             rel_vel = step["vel"]
@@ -726,25 +1097,37 @@ class UdroneRendezvous(UdroneHelixController):
         self._auv_pos = auv[0]
         self._boat = boat
         # Refresh boat baseline before servo FD so nest-relative feedforward
-        # can subtract the same boat_v that _vel will add below.
-        self._boat_vel.update(tm, boat[0][0], boat[0][1])
+        # can subtract the same boat_v that _vel will add below. The prior,
+        # not the vision-corrected pose: offset steps are not boat motion.
+        bp = self._boat_prior or boat[0]
+        self._boat_vel.update(tm, bp[0], bp[1])
         # Chaining after search_otter: land mid-glide only when actually in the
         # tube. Clamped projection s≈1 with huge lat must NOT skip to latch
         # (live bug: WARM start=latch s=1.00 dist_thr=21m).
         if not self._warm_started:
             self._warm_started = True
             corr0 = glide_corridor(auv[0], boat[0], boat[1], prev_phase=None)
+            dist_thr = float(corr0["dist_threshold"])
             on_glide = (
-                corr0.get("near_tube")
-                and corr0["phase"] in ("glide", "flare", "latch")
-                and float(corr0["dist_threshold"]) <= AFT_STANDOFF_M + 1.5
-            )
+                (
+                    corr0.get("near_tube")
+                    and corr0["phase"] in ("glide", "flare", "latch")
+                )
+                # Immediately after detach the hull can be centimetres from
+                # the weld but outside the narrow projected glide tube.  A
+                # cold-tip restart here produced a 2.2 m reference jump.
+                or dist_thr <= 0.75
+            ) and dist_thr <= AFT_STANDOFF_M + 1.5
             if on_glide:
+                # Latch only when already in the weld tube; flare only near the
+                # nest (≤2.5 m). Far "near_tube" warm-starts mid-glide only.
                 if corr0["phase"] == "latch" or (
-                    corr0["s"] >= GLIDE_LATCH_S and corr0["dist_threshold"] <= 1.0
+                    corr0["s"] >= GLIDE_LATCH_S and dist_thr <= 1.0
                 ):
                     self._stage = "latch"
-                elif corr0["phase"] == "flare" or corr0["s"] >= GLIDE_FLARE_S:
+                elif dist_thr <= 2.5 and (
+                    corr0["phase"] == "flare" or corr0["s"] >= GLIDE_FLARE_S
+                ):
                     self._stage = "flare"
                 else:
                     self._stage = "glide"
@@ -767,6 +1150,12 @@ class UdroneRendezvous(UdroneHelixController):
         cone = cone_state(auv[0], auv[1], boat[0], boat[1], CONE_EXIT if docking else 1.0)
         cone["pos"] = auv[0]
         self._cone = cone
+        self._log_vis(cone)
+        if not TERMINAL_MPC:
+            self._weld_attach(tm, cone)
+            goal = self._approach_goal(tm, auv, boat)
+            self._finish_update(tm, cone, boat, goal)
+            return
         # Tag already in weld gate → dock. Else flare/latch + cone → dock MPC.
         tag_weld = self._tag_weld_ok(cone)
         corr_now = self._corridor or glide_corridor(
@@ -779,7 +1168,7 @@ class UdroneRendezvous(UdroneHelixController):
             and self._hits >= FOUND_HITS
             and cone["inside"]
         )
-        if tag_weld or (cone["inside"] and self._ready_to_dock()) or flare_ready:
+        if tag_weld or (cone["inside"] and self._ready_to_dock(cone)) or flare_ready:
             if tag_weld and self._stage != "dock":
                 print(
                     f"RENDEZVOUS_WELD tag pose in latch gate → dock "
@@ -794,12 +1183,37 @@ class UdroneRendezvous(UdroneHelixController):
                 self._leave_dock(cone)
             goal = self._approach_goal(tm, auv, boat)
             self._acc = None
+        self._finish_update(tm, cone, boat, goal)
+
+    def _weld_attach(self, tm, cone):
+        """ATTACH whenever the weld gate holds, whatever the stage."""
+        if self._stage in ("approach", "aft") or not cone["weld"]:
+            self._weld_any_tm = None
+            return
+        if self._weld_any_tm is None:
+            self._weld_any_tm = tm
+            print(
+                f"RENDEZVOUS_WELD gate stage={self._stage} range={cone['range']:.2f} "
+                f"lateral={cone['lateral']:.2f} yaw={math.degrees(cone['yaw']):+.0f}deg "
+                f"tilt={math.degrees(cone['tilt']):.0f}deg",
+                flush=True,
+            )
+        elif tm - self._weld_any_tm >= WELD_HOLD_S:
+            self._request_attach(cone)
+
+    def _finish_update(self, tm, cone, boat, goal):
         if goal is None:
             return
         station, rel_vel = goal
         self._des = station
+        if self._stage != "dock":
+            rel_vel, self._acc = self._slew_reference_velocity(tm, rel_vel)
+        else:
+            self._ref_rel_vel = tuple(float(v) for v in rel_vel)
+            self._ref_vel_tm = float(tm)
         # Nest rides with the boat; dock MPC / servo add nest-relative velocity.
-        boat_v = self._boat_vel.update(tm, boat[0][0], boat[0][1])
+        bp = self._boat_prior or boat[0]
+        boat_v = self._boat_vel.update(tm, bp[0], bp[1])
         self._vel = tuple(boat_v[i] + float(rel_vel[i]) for i in range(3))
         if time.time() >= self._log_t:
             self._log_t = time.time() + 2.0
@@ -813,8 +1227,8 @@ class UdroneRendezvous(UdroneHelixController):
 
     def _hud_layers(self):
         out = UdroneHelixController._hud_layers(self)
-        # Up-cam early on the glide (front only while swimming to the tip).
-        out["camera"] = "front" if self._stage in ("approach", "aft") else "up"
+        # Front camera while it can see the boat's tags; up camera under the boat.
+        out["camera"] = "front" if self._stage in ("approach", "aft", "glide") else "up"
         out["stage"] = self._stage
         s_txt = ""
         if self._corridor is not None and "s" in self._corridor:
@@ -861,15 +1275,51 @@ class UdroneRendezvous(UdroneHelixController):
         return out
 
     def _control(self, tm, auv, boat):
+        boat_truth = boat
+        if boat is not None:
+            boat = self._boat_estimate(tm, auv, boat)
         self._update(tm, auv, boat)
         self.yaw_hold = None
         pos = auv[0]
-        if self._stage in ("dock", "latch") and boat is not None:
+        if not TERMINAL_MPC and boat is not None and self._stage in ("latch", "flare"):
+            if self._stage == "latch":
+                yaw = self._capture_yaw
+                if yaw is None:
+                    yaw = self._centreline_yaw(pos, boat, CAPTURE_LOOKAHEAD_M, CAPTURE_HEADING_OFF)
+                self.yaw_hold = self._slew_yaw(yaw, tm)
+                # Climb per metre forward is tan(pitch) for a body-x thruster,
+                # so a deep entry needs pitch, not time, to reach the sphere.
+                _f, _l, u_n = nest_body_offset(pos, boat[0], boat[1])
+                deep = max(0.0, min(1.0, (-u_n - CAPTURE_ALONG_M) / 0.35))
+                self.pitch_limit = CAPTURE_PITCH_RAD + deep * CAPTURE_PITCH_BOOST_RAD
+            else:
+                self._nest_attitude(
+                    tm, pos, boat, prefer_boat_yaw=True, cruise_pitch=DOCK_PITCH_RAD,
+                )
+                if self.yaw_hold is not None:
+                    self.yaw_hold = self._slew_yaw(
+                        self._centreline_yaw(pos, boat, FLARE_LOOKAHEAD_M, FLARE_HEADING_OFF), tm,
+                    )
+        elif self._stage == "dock" and boat is not None:
             # Plates parallel for weld / last-metre MPC.
             self.yaw_hold = rpy_from_q(boat[1])[2]
             self.pitch_limit = DOCK_PITCH_RAD
             if self._dive_needed(pos):
                 self.pitch_limit = max(DOCK_PITCH_RAD, DIVE_PITCH_RAD * 0.6)
+        elif self._stage == "latch" and boat is not None:
+            lateral = float((self._cone or {}).get("lateral", 99.0))
+            if lateral <= LATCH_CENTER_M:
+                self.yaw_hold = self._slew_yaw(rpy_from_q(boat[1])[2], tm)
+                self.pitch_limit = DOCK_PITCH_RAD
+            elif self._des is not None:
+                # A body-x-only hull cannot remove lateral error while its nose
+                # is rigidly parallel to the boat. Point into the capture
+                # correction, then align with the boat only after centering.
+                dx = float(self._des[0]) - float(pos[0])
+                dy = float(self._des[1]) - float(pos[1])
+                if math.hypot(dx, dy) > 0.03:
+                    self.yaw_hold = self._slew_yaw(math.atan2(dy, dx), tm)
+                self.pitch_limit = max(DOCK_PITCH_RAD, math.radians(24.0))
         elif self._stage == "flare" and boat is not None:
             # Flare: boat yaw, tighten pitch toward level.
             self._nest_attitude(
@@ -887,6 +1337,16 @@ class UdroneRendezvous(UdroneHelixController):
             self._nest_attitude(
                 tm, pos, boat, prefer_boat_yaw=near and not far, cruise_pitch=cruise,
             )
+            # Swim to the tip nose-first. Free yaw here followed the small
+            # horizontal part of the dive force and wagged the hull. Near the
+            # tip, turn onto the boat heading the glide will hold.
+            if self._stage == "approach" and self._transit_yaw is not None:
+                target = self._transit_yaw
+                if near and not far and self.yaw_hold is not None:
+                    target = self.yaw_hold
+                self.yaw_hold = self._slew_yaw(target, tm)
+                if self._dive_needed(pos):
+                    self.pitch_limit = max(float(self.pitch_limit or 0.0), DIVE_PITCH_RAD)
         elif self._stage in ("glide", "commit", "under", "relock"):
             # Boat yaw on the slope; allow nose-down for early up-cam FOV.
             self._nest_attitude(
@@ -894,6 +1354,30 @@ class UdroneRendezvous(UdroneHelixController):
                 prefer_boat_yaw=not self._dive_needed(pos),
                 cruise_pitch=GLIDE_PITCH_RAD,
             )
+            if (
+                self._stage == "glide"
+                and self.yaw_hold is not None
+                and boat is not None
+                and not TERMINAL_MPC
+            ):
+                # The single body-x thruster cannot side-slip, so steer onto
+                # the centreline with a bounded offset from the boat heading.
+                # The old pursuit of the setpoint circled it near the nest.
+                self.yaw_hold = self._centreline_yaw(
+                    pos, boat, GLIDE_LOOKAHEAD_M, GLIDE_HEADING_OFF,
+                )
+            elif self._stage == "glide" and self._des is not None and not self._dive_needed(pos):
+                corr = self._corridor or {}
+                half = max(0.05, float(corr.get("half_m", 0.5)))
+                if float(corr.get("lat", 0.0)) > 0.65 * half:
+                    dx = float(self._des[0]) - float(pos[0])
+                    dy = float(self._des[1]) - float(pos[1])
+                    if math.hypot(dx, dy) > 0.04:
+                        self.yaw_hold = math.atan2(dy, dx)
+            # Turn from the transit bearing onto the boat heading at a rate,
+            # not in one tick. Under/relock keep the direct hold.
+            if self._stage in ("glide", "commit") and self.yaw_hold is not None:
+                self.yaw_hold = self._slew_yaw(self.yaw_hold, tm)
         elif self._des is not None and boat is not None:
             dist = math.hypot(self._des[0] - pos[0], self._des[1] - pos[1])
             prefer = station_heading(dist, rpy_from_q(boat[1])[2])
@@ -903,7 +1387,19 @@ class UdroneRendezvous(UdroneHelixController):
                 prefer_boat_yaw=prefer is not None and self._depth_ok(pos),
                 cruise_pitch=cruise,
             )
-        return UdroneHelixController._control(self, tm, auv, boat)
+        if self.yaw_hold is None or self._stage not in ("approach", "glide", "commit"):
+            # Slewed stages start from the heading last held, or the hull's.
+            self._yaw_out = (
+                self.yaw_hold if self.yaw_hold is not None else rpy_from_q(auv[1])[2]
+            )
+            self._yaw_out_tm = float(tm)
+        return UdroneHelixController._control(self, tm, auv, boat_truth)
+
+    def _slew_yaw(self, target, tm):
+        dt = 0.05 if self._yaw_out_tm is None else float(tm) - float(self._yaw_out_tm)
+        self._yaw_out_tm = float(tm)
+        self._yaw_out = slew_angle(self._yaw_out, target, dt, rate=0.45)
+        return self._yaw_out
 
     def _helix(self, tm: float):
         if self._des is None or self.anchor is None:
@@ -914,7 +1410,7 @@ class UdroneRendezvous(UdroneHelixController):
         c, s = math.cos(yaw0), math.sin(yaw0)
         vx, vy, vz = self._vel
         path_v = (c * vx + s * vy, -s * vx + c * vy, vz)
-        if self._stage in ("dock", "latch") and self._acc is not None:
+        if self._acc is not None:
             ax, ay, az = self._acc
             path_a = (c * ax + s * ay, -s * ax + c * ay, az)
             return (fwd, left, self._des[2]), path_v, path_a

@@ -20,7 +20,12 @@ from rendezvous_geom import (
     DOCK_STANDOFF_M,
 )
 
-# Horizon ≈ 2.4 s; sized to finish well inside the 50 ms force-loop tick.
+# Horizon ≈ 2.4 s. The force loop replans every 50 ms and passes that tick
+# as ``dt``; the rollout still steps at DT.
+# Callers that omit rng share this generator, and it advances. Restarting
+# Random(0) on every tick repeated the same noise. The live runner passes
+# its own generator.
+_RNG = random.Random(1)
 HORIZON = 10
 DT = 0.20
 SAMPLES = 18
@@ -126,10 +131,16 @@ def _clip_u(along, yf, yl, va, vf, vl, climb_cap: float):
     return va, vf, vl
 
 
-def _lag_step(v_state, v_cmd, tau_s: float = VEL_TAU_S):
-    """One first-order lag step matching the force-loop velocity bandwidth."""
+def _lag_step(v_state, v_cmd, tau_s: float = VEL_TAU_S, dt: float = DT):
+    """One first-order lag step matching the force-loop velocity bandwidth.
+
+    The rollout holds each command for a horizon step (``DT``). The value
+    published to the thrusters must use the control tick instead, or a 50 ms
+    loop converges the 0.65 s lag about four times too fast.
+    """
     tau = max(0.08, float(tau_s))
-    a = min(1.0, DT / tau)
+    step = max(1e-3, float(dt))
+    a = min(1.0, step / tau)
     return tuple(float(v_state[i]) + a * (float(v_cmd[i]) - float(v_state[i])) for i in range(3))
 
 
@@ -209,15 +220,19 @@ def plan(
     warm: Optional[list] = None,
     rng: Optional[random.Random] = None,
     v_state: Optional[tuple] = None,
+    dt: Optional[float] = None,
 ) -> dict:
     """Receding plan from a live ``cone_state`` dict (must include ``pos``).
 
     Returns world setpoint, nest-relative world velocity, warm sequence, and
     diagnostics. Velocity is relative to the nest (caller adds boat velocity).
     ``v_state`` is the lagged nest-frame velocity from the previous tick
-    (warm-starts the first-order plant).
+    (warm-starts the first-order plant). ``dt`` is the control tick used for
+    that lag; the horizon rollout stays at ``DT``. Omit ``rng`` to keep one
+    generator across calls. A new ``Random(0)`` every tick repeats the noise.
     """
-    rng = rng or random.Random(0)
+    rng = _RNG if rng is None else rng
+    step_dt = DT if dt is None else min(DT, max(1e-3, float(dt)))
     climb_cap = max(0.05, float(climb_mps))
     along, yf, yl = nest_state(cone)
     nest = cone["nest"]
@@ -248,7 +263,6 @@ def plan(
         sigma = (0.05, 0.04, 0.04)
     else:
         sigma = (0.10, 0.12, 0.12)
-    best_U = mean
     best_cost = float("inf")
 
     for _ in range(CEM_ITERS):
@@ -268,7 +282,6 @@ def plan(
             scored.append((cost, U))
             if cost < best_cost:
                 best_cost = cost
-                best_U = U
         scored.sort(key=lambda t: t[0])
         elite = scored[:ELITES]
         mean = []
@@ -280,9 +293,16 @@ def plan(
         # Shrink exploration each CEM iteration.
         sigma = tuple(max(0.03, 0.65 * sigma[j]) for j in range(3))
 
-    va, vf, vl = _clip_u(along, yf, yl, *best_U[0], climb_cap)
-    # Achievable nest velocity after one lag step (what the force loop can track).
-    v_lag = _lag_step(v0, (va, vf, vl))
+    # Apply the elite mean, not the single noisiest sample. That sample used
+    # to be the next warm start, so the same perturbation could win every tick.
+    va, vf, vl = _clip_u(along, yf, yl, *mean[0], climb_cap)
+    # Achievable nest velocity after one control tick of lag.
+    v_lag = _lag_step(v0, (va, vf, vl), dt=step_dt)
+    # Last-metre hold: the command and the depth target stay put. Publishing
+    # the leftover lagged climb made the force loop keep rising.
+    holding = _final_gate(along, yf, yl)
+    if holding:
+        v_lag = (0.0, v_lag[1], v_lag[2])
 
     # Consistent (p, v): advance one DT from the *current* nest-frame state.
     # Soft-capture lateral toward the nest axis (AXIS_KEEP / FINAL_KEEP) so the
@@ -293,7 +313,7 @@ def plan(
         keep = min(keep, FINAL_KEEP)
     along_ref = max(DOCK_STANDOFF_M, along + v_lag[0] * DT)
     # When off-axis in the final metre, hold along (do not lead climb).
-    if _final_gate(along, yf, yl):
+    if holding:
         along_ref = max(DOCK_STANDOFF_M, along)
     yf_ref = yf * keep + v_lag[1] * DT
     yl_ref = yl * keep + v_lag[2] * DT
@@ -309,7 +329,7 @@ def plan(
         "point": point,
         "vel": vel,
         "along": along_ref,
-        "warm": best_U,
+        "warm": [tuple(float(c) for c in u) for u in mean],
         "cost": best_cost,
         "u0": (va, vf, vl),
         "v_lag": v_lag,

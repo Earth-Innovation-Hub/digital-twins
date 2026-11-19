@@ -280,6 +280,23 @@ def trapezoid_time(length_m: float, vmax: float, amax: float) -> float:
     return 2.0 * t_acc + (length - amax * t_acc * t_acc) / vmax
 
 
+def slew_angle(prev, target, dt, rate: float = 0.45) -> float:
+    """Move ``prev`` toward ``target`` by at most ``rate`` rad/s.
+
+    ``prev`` None takes the target on the first sample.
+    """
+    def wrap(a: float) -> float:
+        return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+    target = wrap(float(target))
+    if prev is None:
+        return target
+    err = wrap(target - float(prev))
+    step_dt = min(0.25, max(1e-3, float(dt)))
+    step = min(abs(err), max(0.0, float(rate)) * step_dt)
+    return wrap(float(prev) + math.copysign(step, err))
+
+
 def polyline_pos_vel(waypoints: list, speed_mps: float, t: float):
     """Constant-speed interpolation along a 3D polyline.
 

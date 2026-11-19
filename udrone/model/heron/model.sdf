@@ -68,7 +68,13 @@
            underside is z=0.26. The white board hangs just below it, and the
            tag faces down (mesh +Z pitched 180 deg) so an AUV underneath can
            see it. Visual only: no collision, so the nest and the buoyancy
-           boxes are unchanged. Id 10 is not the lake-bed cube (id 0). -->
+           boxes are unchanged. Id 10 is not the lake-bed cube (id 0).
+
+           The boat's tags and plates are self-lit (emissive map = the tag
+           texture). They face down or aft, away from the sun, and the world
+           has no scattered light: with a flat 0.15 emissive the white plate
+           and the tag's black border rendered the same grey (about 108 of
+           255) and no camera ever decoded tag 10. -->
       <visual name="deck_tag_plate">
         <pose>0 0 0.257 0 0 0</pose>
         <cast_shadows>false</cast_shadows>
@@ -76,6 +82,7 @@
         <material>
           <ambient>0.95 0.95 0.95 1</ambient>
           <diffuse>0.98 0.98 0.98 1</diffuse>
+          <emissive>0.9 0.9 0.9 1</emissive>
         </material>
       </visual>
       <visual name="apriltag_10">
@@ -85,10 +92,73 @@
         <material>
           <ambient>1 1 1 1</ambient>
           <diffuse>1 1 1 1</diffuse>
-          <emissive>0.15 0.15 0.15 1</emissive>
+          <emissive>1 1 1 1</emissive>
           <pbr>
             <metal>
               <albedo_map>model://heron/materials/textures/apriltag36h11_10.png</albedo_map>
+              <emissive_map>model://heron/materials/textures/apriltag36h11_10.png</emissive_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <!-- AprilTags 36h11 id 11 (port) and id 12 (starboard), 0.24 m, on white
+           0.32 m plates on the stern end of each pontoon (x = -0.60), facing
+           aft. An AUV on the aft glide path sees them nearly head-on in its
+           front camera: the midpoint of the pair is the centreline and their
+           0.76 m spacing gives range. The mesh is the 0.40 m plane scaled by
+           0.6; +Z of the mesh points aft and +Y points up. Visual only. -->
+      <visual name="stern_tag_plate_port">
+        <pose>-0.602 0.38 0.14 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><box><size>0.004 0.32 0.32</size></box></geometry>
+        <material>
+          <ambient>0.95 0.95 0.95 1</ambient>
+          <diffuse>0.98 0.98 0.98 1</diffuse>
+          <emissive>0.9 0.9 0.9 1</emissive>
+        </material>
+      </visual>
+      <visual name="apriltag_11">
+        <pose>-0.606 0.38 0.14 1.5707963 0 -1.5707963</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://heron/meshes/tag_plane.obj</uri><scale>0.6 0.6 1</scale></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>1 1 1 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>model://heron/materials/textures/apriltag36h11_11.png</albedo_map>
+              <emissive_map>model://heron/materials/textures/apriltag36h11_11.png</emissive_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <visual name="stern_tag_plate_starboard">
+        <pose>-0.602 -0.38 0.14 0 0 0</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><box><size>0.004 0.32 0.32</size></box></geometry>
+        <material>
+          <ambient>0.95 0.95 0.95 1</ambient>
+          <diffuse>0.98 0.98 0.98 1</diffuse>
+          <emissive>0.9 0.9 0.9 1</emissive>
+        </material>
+      </visual>
+      <visual name="apriltag_12">
+        <pose>-0.606 -0.38 0.14 1.5707963 0 -1.5707963</pose>
+        <cast_shadows>false</cast_shadows>
+        <geometry><mesh><uri>model://heron/meshes/tag_plane.obj</uri><scale>0.6 0.6 1</scale></mesh></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <emissive>1 1 1 1</emissive>
+          <pbr>
+            <metal>
+              <albedo_map>model://heron/materials/textures/apriltag36h11_12.png</albedo_map>
+              <emissive_map>model://heron/materials/textures/apriltag36h11_12.png</emissive_map>
               <roughness>1.0</roughness>
               <metalness>0.0</metalness>
             </metal>

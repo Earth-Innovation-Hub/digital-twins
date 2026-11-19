@@ -8,10 +8,10 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | (in-process) | `dock`, `goto`, `survey`, `hold`, `abort` | boat + latch |
 | `run_helix.py` | `helix` | AUV forward helix |
 | `run_swim.py` | `swim` | AUV straight leg (compass, world, or along heading) |
-| `run_hoop.py` | `hoop` | Front-camera search → corridor to the gate → hold until centered → 0.6 m/s surge. Pass is `hoop_pass` (opening sample and exit); verdict on `hoop_done` |
+| `run_hoop.py` | `hoop` | Front-camera search. An authored-ring match starts the corridor (image need not be centered) → hold the gate with no along-track speed → 0.6 m/s surge that stops at the exit. Pass is `hoop_pass`; verdict on `hoop_done` |
 | `run_track_otter.py` | `track` | Hold under otter_k on deck tag 10 (`track_geom.py`) |
 | `run_search_otter.py` | `search_otter` | Aft station → expanding sine → under nest → lock deck tag 10 (up-cam); no latch; chain with `rendezvous` |
-| `run_rendezvous.py` | `rendezvous` | Nest-axis approach → deck tag 10 up-cam servo → latch (`rendezvous_geom.py`) |
+| `run_rendezvous.py` | `rendezvous` | Glide from 6 m aft on the boat centreline → fly through the weld sphere 0.25 m under the nest → ATTACH when the weld gate holds; go-around on a miss. The front camera's fixes on tags 10/11/12 correct the boat pose it flies on (`boat_fix.py`, `rendezvous_geom.py`) |
 | `run_shape.py` | `shape` | Infinity / orbit / vertical loop (`shape_geom.py`) |
 | `run_coverage.py` | `coverage` | AUV 3D lawnmower (`patterns.volume_lawnmower`) |
 | `run_approach_tag.py` | `approach_tag` | Expanding spiral search → front-cam IBVS rates |
@@ -22,10 +22,12 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | `coverage_plan.py` | (used by mapper / `coverage --plan map`) | Map-aware boustrophedon over costmap gaps |
 
 Helix, swim, hoop, track, and coverage share `UdroneHelixController` (force → point-hull-axis).
-`swim` is one polyline leg. `hoop` (`hoop_geom.py`) covers a dock-centred grid
-until the front camera's orange pixels form a ring, then flies the corridor
-to the gate. Inside 1.2 m it holds that gate with yaw free until `|y|` and
-`|dz|` are each within 0.15 m, then locks the axis and surges at 0.6 m/s.
+`swim` is one polyline leg. `hoop` (`hoop_geom.py`, `hoop_mpc.py`) covers a
+dock-centred grid and finishes the dive before the leg translates. A closed
+ring that matches the authored hoop starts one pursuit reference: dive in
+place, slide onto the centreline, then cruise at 0.32 m/s and brake to a
+stop at the exit. The nose stays free. The through-direction is frozen at
+entry. The ring does not have to be centered in the image.
 A pass (`hoop_pass`) needs one sample inside the authored opening (radial
 ≤ 0.40 m, logged as `HOOP_PLANE`) and later arrival within 0.6 m of the
 frozen exit (`HOOP_EXIT`). Time in the punch and a close camera crop do not
@@ -45,7 +47,7 @@ map that carries the bed depth and obstacles from `xudrone_mapper` (see the pack
 [README](../README.md#mapping)). A runner adds its own layer with `_hud_layers()`: the hoop adds the ring
 box, planned path, end, and fix; the rendezvous adds an ILS-style glide path
 (`glide_path`: aft→under funnel + nest-axis dock rails/cone), nest, lateral/tilt,
-and dock state (front cam on aft/commit, up cam on servo/dock). Geometry is in `rendezvous_geom`
+and dock state (front cam through the glide, up cam from the flare). Geometry is in `rendezvous_geom`
 (nest between pontoons, approach along boat −Z, plates parallel). `track`
 holds the upward camera about 1 m under AprilTag 10 on the
 Heron deck. The method is Harish Anand's ASU thesis

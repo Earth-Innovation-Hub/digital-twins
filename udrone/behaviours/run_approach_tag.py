@@ -155,6 +155,7 @@ class UdroneApproachController(UdroneHelixController):
 
         self.arrived = False
         self._settle_t0 = None
+        self._park_t0 = None
         self._stage = "search"
         self._had_tag = False
         self.tag_source = None
@@ -490,23 +491,21 @@ class UdroneApproachController(UdroneHelixController):
 
             at_rmax = self._search_r >= self.search_r_max - 1e-3
             if self._search_total >= self.search_budget_s and at_rmax and not self._fresh_det():
-                self.failed = "lost_tag"
                 print(
                     f"FAIL lost_tag (search budget {self.search_budget_s:.0f}s "
                     f"and Rmax={self.search_r_max:g} exhausted)",
                     flush=True,
                 )
-                self.done = True
+                self._fail_and_disarm("lost_tag")
                 return
             # Soft fail: budget exhausted even if not at Rmax (avoid infinite grow).
             if self._search_total >= self.search_budget_s and not self._fresh_det():
-                self.failed = "lost_tag"
                 print(
                     f"FAIL lost_tag (search budget {self.search_budget_s:.0f}s exhausted, "
                     f"R={self._search_r:.1f})",
                     flush=True,
                 )
-                self.done = True
+                self._fail_and_disarm("lost_tag")
                 return
             return
 
@@ -523,14 +522,11 @@ class UdroneApproachController(UdroneHelixController):
             if self._stage == "settle" and self._settle_t0 is not None:
                 held = tm - self._settle_t0
                 if held >= max(1.0, 0.5 * self.settle_s):
-                    self.arrived = True
-                    self._stage = "done"
-                    print(
-                        f"APPROACH_ARRIVED IBVS (settle held {held:.1f}s; det dropout) "
-                        f"u={self._det_u:.1f} v={self._det_v:.1f} s={self._det_s:.1f}",
-                        flush=True,
-                    )
+                    self._enter_park(tm, "settle dropout")
                     return
+            if self._stage == "park":
+                self._tick_park(tm)
+                return
             if self._stage in ("approach", "settle") and (time.time() - self._det_t) > LOST_S:
                 pos = self._prev[1] if self._prev else None
                 self._enter_search(tm, "lost_track", pos=pos)
@@ -560,12 +556,10 @@ class UdroneApproachController(UdroneHelixController):
                     flush=True,
                 )
             elif tm - self._settle_t0 >= self.settle_s:
-                self.arrived = True
-                self._stage = "done"
-                print(
-                    f"APPROACH_ARRIVED IBVS u={self._det_u:.1f} v={self._det_v:.1f} "
+                self._enter_park(
+                    tm,
+                    f"IBVS u={self._det_u:.1f} v={self._det_v:.1f} "
                     f"s={self._det_s:.1f} z_est={self._z_est(self._det_s):.2f}",
-                    flush=True,
                 )
         else:
             if self._stage == "settle" and s_ratio >= ARRIVE_S * 0.7:
@@ -574,8 +568,54 @@ class UdroneApproachController(UdroneHelixController):
                 self._settle_t0 = None
                 if self._stage == "settle":
                     self._stage = "approach"
+        if self._stage == "park":
+            self._tick_park(tm)
+
+    def _enter_park(self, tm: float, why: str):
+        """Optical settle done — climb/dive to commanded park depth before PASS."""
+        if self._stage == "park":
+            return
+        self._stage = "park"
+        self._park_t0 = tm
+        print(f"APPROACH_DEPTH_PARK → z={self.depth_m:.2f} ({why})", flush=True)
+
+    def _tick_park(self, tm: float):
+        pos = self._prev[1] if self._prev else None
+        if pos is None:
+            return
+        if abs(pos[2] - self.depth_m) <= max(0.25, self.depth_tol_m):
+            self.arrived = True
+            self._stage = "done"
+            print(
+                f"APPROACH_ARRIVED park z={pos[2]:.2f} (target {self.depth_m:.2f})",
+                flush=True,
+            )
+            return
+        # Don't block the tour forever if bed clearance fights park depth.
+        if self._park_t0 is not None and (tm - self._park_t0) >= 20.0:
+            self.arrived = True
+            self._stage = "done"
+            print(
+                f"APPROACH_ARRIVED park timeout z={pos[2]:.2f} "
+                f"(target {self.depth_m:.2f})",
+                flush=True,
+            )
+
+    def _fail_and_disarm(self, why: str):
+        """Fail without leaving an armed gap for the next chained step."""
+        self.failed = why
+        try:
+            self._publish_setpoints(0.0, 0.0, 0.0, 0.0)
+            self._stop_vehicle()
+            self._drop_baton()
+        except Exception:
+            pass
+        self.done = True
 
     def _helix(self, tm: float):
+        # During IBVS hold live depth; after optical settle, climb to park depth.
+        if self._stage == "park":
+            return (0.0, 0.0, self.depth_m), (0.0, 0.0, 0.0)
         z = self.depth_m
         if self._prev is not None:
             z = self._prev[1][2]

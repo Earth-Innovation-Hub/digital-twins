@@ -1,13 +1,16 @@
-"""Receding-horizon through-hoop planner in the hoop frame (ROS-free).
+"""Dynamics-matched through-hoop reference (ROS-free).
 
 State is ``(s, y, z)``:
   - ``s`` along the ring axis (0 at the opening; approach s < 0, exit s > 0)
   - ``y`` horizontal lateral
   - ``z`` vertical offset from the ring centre
 
-Keeps the hull inside a cylindrical tube while driving ``s`` through the
-opening to ``exit_m``. Same CEM + first-order velocity lag pattern as
-``dock_mpc``, different frame and costs.
+The force loop adds at most 0.4 m/s of position correction on top of the
+commanded velocity, and the hull has no sideslip: the nose follows the
+force. A distant carrot or a lateral velocity the hull cannot produce
+pitches the nose and runs through the ring. This planner commands a short
+pursuit point on one continuous curve: close lateral and depth error before
+the plane, cruise at ≤ 0.32 m/s, then brake at the exit.
 
 Disable with ``UDRONE_HOOP_MPC=0``.
 """
@@ -90,94 +93,214 @@ def _final_gate(s: float, y: float, z: float) -> bool:
     return (-FINAL_S_M <= float(s) < 0.15) and math.hypot(float(y), float(z)) > FINAL_LAT_M
 
 
-def _clip_u(
-    vs, vy, vz, speed_cap: float,
-    s: Optional[float] = None, exit_m: Optional[float] = None,
-    y: Optional[float] = None, z: Optional[float] = None,
+# Force-loop limits (udrone_sinusoidal_controller). Position correction is
+# capped at 0.4 m/s, so cruise stays under that and the pursuit lead is short.
+# The velocity loop lags about 0.65 s (KV≈1.5), so the brake distance includes
+# that coast. Pitch matches run_hoop: 40° in cruise, 70° while still off depth.
+A_BRAKE = 0.28
+VEL_TAU_S = 0.65
+LEAD_T = 0.30
+LEAD_MAX = 0.12
+CRUISE_PITCH = math.radians(40.0)
+DIVE_PITCH = math.radians(70.0)
+PITCH_SPAN_M = 0.80          # depth error over which pitch opens 40° → 70°
+SLEW_MPS2 = 0.30             # how fast the runner may change the commanded velocity
+DEPTH_HOLD_M = 0.20
+# Descent the hull actually makes on the approach (0.28 commanded; the live
+# 2026-11-19 run made about 0.2 m/s) and the depth error allowed at the plane.
+VZ_EFF_MPS = 0.20
+PLANE_DEPTH_TOL_M = 0.08
+# Lateral closure gets the same continuous feasibility treatment as depth.
+# This replaces the old hard OFF_TUBE_M branch, which made the live runner
+# alternate join/through whenever y crossed ±0.40 m.
+VY_EFF_MPS = 0.13
+PLANE_LAT_TOL_M = 0.10
+# Past the plane with no in-opening sample: the pass is lost. Go around.
+MISS_S_M = 0.45
+DIVE_ERR_M = 0.55          # only a clearly shallow hull dives in place
+DIVE_FAR_S = -2.5           # and only while still well short of the ring
+DIVE_MPS = 0.28
+ON_LINE_M = 0.22
+CENTER_M = 0.15
+OFF_TUBE_M = 0.40           # beyond this, slide to the axis instead of advancing
+CRUISE_CAP = 0.32
+GATE_S = -1.20
+
+
+def _brake_speed(dist, cruise, accel: float = A_BRAKE, tau: float = VEL_TAU_S) -> float:
+    """Fastest speed that can stop in ``dist`` metres, including velocity lag.
+
+    The kinematic stop is ``v²/(2a)``. The force loop keeps the old speed for
+    about ``tau`` seconds, so that coast is part of the distance.
+    """
+    dist = max(0.0, float(dist))
+    if dist <= 1e-6:
+        return 0.0
+    a = max(1e-3, float(accel))
+    lag = max(0.0, float(tau))
+    v = a * (-lag + math.sqrt(lag * lag + 2.0 * dist / a))
+    return min(float(cruise), max(0.0, v))
+
+
+def pitch_limit_rad(depth_m: float) -> float:
+    """Nose allowance: 40° on depth, opening to 70° as the depth error grows."""
+    t = min(1.0, abs(float(depth_m)) / PITCH_SPAN_M)
+    return CRUISE_PITCH + t * (DIVE_PITCH - CRUISE_PITCH)
+
+
+def slew_velocity(prev, target, dt, accel: float = SLEW_MPS2):
+    """Step ``prev`` toward ``target`` by at most ``accel * dt``.
+
+    Returns ``(velocity, acceleration)``. The acceleration is that step, so
+    the force loop is not handed a square-wave brake.
+    """
+    step = min(0.25, max(1e-3, float(dt)))
+    cap = max(0.0, float(accel)) * step
+    delta = tuple(float(target[i]) - float(prev[i]) for i in range(3))
+    n = math.sqrt(sum(d * d for d in delta))
+    if n > cap:
+        delta = tuple(d * cap / n for d in delta)
+    vel = tuple(float(prev[i]) + delta[i] for i in range(3))
+    acc = tuple(delta[i] / step for i in range(3))
+    return vel, acc
+
+
+def filter_center(prev, observed, alpha: float = 0.25, step_m: float = 0.40):
+    """Bounded EMA for a static world-frame ring centre."""
+    obs = tuple(float(v) for v in observed)
+    if prev is None:
+        return obs
+    old = tuple(float(v) for v in prev)
+    delta = tuple(
+        max(-float(step_m), min(float(step_m), obs[i] - old[i]))
+        for i in range(3)
+    )
+    return tuple(old[i] + float(alpha) * delta[i] for i in range(3))
+
+
+def search_dive_reference(z_now, target_z, max_speed: float = 0.24, lead_m: float = 0.12):
+    """Short-carrot search dive; returns ``(z_ref, vz)``.
+
+    The full-depth point made the position loop add its 0.4 m/s correction to
+    the descent velocity. A short point keeps that correction proportional and
+    fades both point and velocity at the target.
+    """
+    z = float(z_now)
+    target = float(target_z)
+    err = max(0.0, z - target)
+    vz = -min(float(max_speed), 0.7 * err)
+    z_ref = max(target, z - min(float(lead_m), abs(vz) * 0.6))
+    return z_ref, vz
+
+
+def search_glide_reference(
+    current,
+    end,
+    target_z,
+    max_vz: float = 0.24,
+    min_vh: float = 0.12,
+    max_vh: float = 0.32,
+    ramp_depth_m: float = 4.0,
 ):
-    vs = max(-0.15, min(float(speed_cap), float(vs)))
-    # Never reverse while still short of the exit — a one-step setpoint from
-    # rest sits on the hull; under axis yaw_hold that becomes thrust reverse
-    # and s runs away from the opening (2026-11-17 hoop log).
-    if s is not None and exit_m is not None and float(s) < float(exit_m) - 0.25:
-        vs = max(0.05, vs)
-    # Align then punch: crawl along +s until centered in the final metre.
-    if s is not None and y is not None and z is not None and _final_gate(s, y, z):
-        vs = min(vs, FINAL_VS_CAP)
-        vs = max(0.04, vs)
-    vy = max(-V_LAT_MAX, min(V_LAT_MAX, float(vy)))
-    vz = max(-V_LAT_MAX, min(V_LAT_MAX, float(vz)))
-    return vs, vy, vz
+    """Forward nose-down search glide with a short, continuous carrot."""
+    x, y, z = (float(v) for v in current)
+    ex, ey = float(end[0]), float(end[1])
+    dx, dy = ex - x, ey - y
+    dist = math.hypot(dx, dy)
+    if dist > 1e-6:
+        ux, uy = dx / dist, dy / dist
+    else:
+        ux = uy = 0.0
+    depth_err = max(0.0, z - float(target_z))
+    progress = 1.0 - min(1.0, depth_err / max(0.1, float(ramp_depth_m)))
+    vh = float(min_vh) + (float(max_vh) - float(min_vh)) * progress
+    vh = min(vh, dist / 0.6) if dist > 0.0 else 0.0
+    z_ref, vz = search_dive_reference(z, target_z, max_speed=max_vz)
+    lead_h = min(0.18, vh * 0.6, dist)
+    point = (x + lead_h * ux, y + lead_h * uy, z_ref)
+    vel = (vh * ux, vh * uy, vz)
+    return point, vel
 
 
-def _lag_step(v_state, v_cmd, tau_s: float = VEL_TAU_S):
-    tau = max(0.08, float(tau_s))
-    a = min(1.0, DT / tau)
-    return tuple(float(v_state[i]) + a * (float(v_cmd[i]) - float(v_state[i])) for i in range(3))
+def _along_lead(vel, fwd) -> float:
+    direction, speed = _unit(vel)
+    lead = min(LEAD_MAX, speed * LEAD_T)
+    return lead * (
+        direction[0] * fwd[0] + direction[1] * fwd[1] + direction[2] * fwd[2]
+    )
 
 
-def _rollout(s0, y0, z0, U, speed_cap: float, exit_m: float, v0=(0.0, 0.0, 0.0)):
-    s, y, z = s0, y0, z0
-    v_s = tuple(float(c) for c in v0)
-    cost = 0.0
-    for vs, vy, vz in U:
-        vs, vy, vz = _clip_u(vs, vy, vz, speed_cap, s=s, exit_m=exit_m, y=y, z=z)
-        v_s = _lag_step(v_s, (vs, vy, vz))
-        s = s + v_s[0] * DT
-        y = y + v_s[1] * DT
-        z = z + v_s[2] * DT
-        lat = math.hypot(y, z)
-        # Near the plane, lateral error dominates — do not score a rim graze
-        # as progress toward exit.
-        w_lat = W_LAT * (2.8 if -FINAL_S_M <= s < 0.3 else 1.0)
-        stage = (
-            W_S * (exit_m - s) ** 2
-            + w_lat * lat * lat
-            + W_V * (vs * vs + vy * vy + vz * vz)
+def _lead_point(pos, vel):
+    """A short point along ``vel``. The carrot stays near the hull."""
+    direction, speed = _unit(vel)
+    lead = min(LEAD_MAX, speed * LEAD_T)
+    if speed < 1e-3:
+        return tuple(float(p) for p in pos)
+    return tuple(float(pos[i]) + lead * direction[i] for i in range(3))
+
+
+def _axis_velocity(
+    y, z, dist_along, along_sign, cruise, fwd, left, up,
+    dist_plane=None, vy_meas=0.0,
+):
+    """Along-track speed plus a dive that finishes before the plane.
+
+    Vertical speed fades with the depth error. Forward speed is capped so
+    that, at the descent the hull really makes (``VZ_EFF_MPS``), the depth
+    left over at the plane is inside ``PLANE_DEPTH_TOL_M``. The cap is
+    recomputed from the measured depth every tick, so a slow descent slows
+    the approach. ``dist_plane`` is metres of approach left; ``None`` (past
+    the plane, or backing away from it) leaves the brake curve alone.
+    """
+    depth = float(z)
+    vz_mag = min(DIVE_MPS, abs(depth) * 0.7)
+    vh = _brake_speed(dist_along, cruise)
+    excess = abs(depth) - PLANE_DEPTH_TOL_M
+    if dist_plane is not None and excess > 1e-3:
+        vh = min(vh, VZ_EFF_MPS * max(0.0, float(dist_plane)) / excess)
+    # Lateral PD in the hoop frame. Velocity damping removes the residual
+    # ±0.15 m crossings left by position-only centering.
+    vy = max(-0.16, min(0.16, -0.75 * float(y) - 0.55 * float(vy_meas)))
+    lateral_excess = abs(float(y)) - PLANE_LAT_TOL_M
+    if dist_plane is not None and lateral_excess > 1e-3:
+        vh = min(
+            vh,
+            VY_EFF_MPS * max(0.0, float(dist_plane)) / lateral_excess,
         )
-        if not tube_ok(y, z):
-            stage += W_TUBE * (1.0 + lat)
-        if -FINAL_S_M <= s < 0.2 and lat > FINAL_LAT_M:
-            stage += 60.0 * (lat - FINAL_LAT_M) ** 2
-        # Hard preference: never score reverse while short of the exit.
-        if s < exit_m - 0.25 and vs < 0.05:
-            stage += 40.0 * (0.05 - vs) ** 2
-        cost += stage
-    lat_t = math.hypot(y, z)
-    cost += W_TERMINAL * ((exit_m - s) ** 2 + 2.5 * lat_t * lat_t)
-    return cost, (s, y, z)
+    vz = -vz_mag if depth > 0.0 else vz_mag
+    return tuple(
+        float(along_sign) * vh * float(fwd[i])
+        + vy * float(left[i])
+        + vz * float(up[i])
+        for i in range(3)
+    )
 
 
-def _seed_sequence(s, y, z, speed_cap: float, exit_m: float):
-    """Warm start: surge toward exit, first-order pull into the tube."""
-    U = []
-    ss, yy, zz = s, y, z
-    lat_tau = 0.45
-    for _ in range(HORIZON):
-        vs = float(speed_cap)
-        # Slow a bit if far off-axis so lateral can catch up before the plane.
-        lat = math.hypot(yy, zz)
-        if lat > TUBE_R * 0.45 and ss < 0.0:
-            vs *= max(0.40, 1.0 - (lat - TUBE_R * 0.45) / max(TUBE_R, 1e-3))
-        vy = max(-V_LAT_MAX, min(V_LAT_MAX, -yy / lat_tau))
-        vz = max(-V_LAT_MAX, min(V_LAT_MAX, -zz / lat_tau))
-        vs, vy, vz = _clip_u(vs, vy, vz, speed_cap, s=ss, exit_m=exit_m, y=yy, z=zz)
-        U.append((vs, vy, vz))
-        ss = ss + vs * DT
-        yy = yy + vy * DT
-        zz = zz + vz * DT
-        if ss > exit_m:
-            break
-    while len(U) < HORIZON:
-        U.append(U[-1] if U else (speed_cap, 0.0, 0.0))
-    return U
+def _unit(v):
+    n = math.sqrt(sum(c * c for c in v))
+    if n < 1e-9:
+        return (0.0, 0.0, 0.0), 0.0
+    return tuple(c / n for c in v), n
 
 
-# Force-loop lead along +s so the tracked point sits ahead of the hull.
-# One lag-step from rest is ~cm and under yaw_hold reads as "behind" → reverse.
-LEAD_S_M = 0.55
-LEAD_S_T = 1.25   # seconds of speed_cap added on top of lagged advance
-LEAD_S_FINAL = 0.35  # shorter lead while aligning in the final metre
+def _world(center, fwd, left, up, s, y, z):
+    return tuple(
+        float(center[i]) + float(s) * float(fwd[i]) + float(y) * float(left[i]) + float(z) * float(up[i])
+        for i in range(3)
+    )
+
+
+def _pursuit(pos, target, cruise):
+    """Point a fraction of a second toward ``target``, with a stoppable speed."""
+    delta = tuple(float(target[i]) - float(pos[i]) for i in range(3))
+    direction, dist = _unit(delta)
+    speed = _brake_speed(dist, cruise)
+    lead = min(LEAD_MAX, speed * LEAD_T, dist)
+    point = tuple(float(pos[i]) + lead * direction[i] for i in range(3))
+    vel = tuple(speed * direction[i] for i in range(3))
+    braking = speed < float(cruise) - 0.02 and dist > 1e-3
+    acc = tuple((-A_BRAKE * direction[i]) if braking else 0.0 for i in range(3))
+    return point, vel, acc, speed
 
 
 def plan(
@@ -190,94 +313,73 @@ def plan(
     rng: Optional[random.Random] = None,
     v_state: Optional[tuple] = None,
 ) -> dict:
-    """Receding plan; returns world point + velocity for the force loop."""
-    rng = rng or random.Random(0)
-    speed_cap = max(0.12, float(speed_mps))
+    """One pursuit reference the force loop can track.
+
+    Close depth and lateral error continuously while making only feasible
+    forward progress, then brake to a stop at the exit. Past the plane the
+    lateral correction continues forward; the runner starts a go-around when
+    no opening sample was earned. ``warm`` and ``rng`` are accepted so older
+    callers keep working.
+    """
+    del warm, rng
+    cruise = min(CRUISE_CAP, max(0.12, float(speed_mps)))
     exit_m = max(0.6, float(exit_m))
     s, y, z, fwd, left, up = hoop_state(pos, center, axis_xy)
-    v0 = tuple(float(c) for c in (v_state or (0.0, 0.0, 0.0)))
-    # Drop a reverse-poisoned warm start (s running away from the opening).
-    if warm and s < exit_m - 0.25 and warm[0][0] < 0.0:
-        warm = None
-    if v0[0] < 0.0 and s < exit_m - 0.25:
-        v0 = (0.0, v0[1], v0[2])
+    vy_meas = 0.0
+    if v_state is not None and len(v_state) >= 2:
+        vy_meas = (
+            float(v_state[0]) * float(left[0])
+            + float(v_state[1]) * float(left[1])
+        )
+    # Depth is not a sideways miss. It scales forward speed in _axis_velocity.
+    off_axis = abs(float(y))
+    exit_pt = _world(center, fwd, left, up, exit_m, 0.0, 0.0)
+    stopped = (0.0, 0.0, 0.0)
 
-    mean = warm
-    if not mean or len(mean) != HORIZON:
-        mean = _seed_sequence(s, y, z, speed_cap, exit_m)
-    else:
-        mean = list(mean[1:]) + [mean[-1]]
+    def pack(point, vel, acc, mode, s_ref, final):
+        vs = vel[0] * fwd[0] + vel[1] * fwd[1]
+        vy = vel[0] * left[0] + vel[1] * left[1]
+        vz = vel[2]
+        return {
+            "point": point,
+            "vel": vel,
+            "acc": acc,
+            "s": float(s_ref),
+            "y": 0.0,
+            "z": 0.0,
+            "warm": None,
+            "cost": 0.0,
+            "u0": (vs, vy, vz),
+            "v_lag": (vs, vy, vz),
+            "state0": (s, y, z),
+            "fwd": fwd,
+            "left": left,
+            "up": up,
+            "in_tube": tube_ok(y, z),
+            "final_gate": bool(final),
+            "yaw_hold": None,
+            "mode": mode,
+            "exit": exit_pt,
+        }
 
-    sigma = (0.08, 0.12, 0.12)
-    best_U = mean
-    best_cost = float("inf")
-
-    for _ in range(CEM_ITERS):
-        scored = []
-        for sample_i in range(SAMPLES):
-            if sample_i == 0:
-                U = [tuple(u) for u in mean]
-            else:
-                U = []
-                for u in mean:
-                    U.append((
-                        u[0] + rng.gauss(0.0, sigma[0]),
-                        u[1] + rng.gauss(0.0, sigma[1]),
-                        u[2] + rng.gauss(0.0, sigma[2]),
-                    ))
-            cost, _ = _rollout(s, y, z, U, speed_cap, exit_m, v0=v0)
-            scored.append((cost, U))
-            if cost < best_cost:
-                best_cost = cost
-                best_U = U
-        scored.sort(key=lambda t: t[0])
-        elite = scored[:ELITES]
-        mean = []
-        for k in range(HORIZON):
-            mean.append(tuple(
-                sum(e[1][k][j] for e in elite) / float(len(elite))
-                for j in range(3)
-            ))
-        sigma = tuple(max(0.03, 0.65 * sigma[j]) for j in range(3))
-
-    vs, vy, vz = _clip_u(*best_U[0], speed_cap, s=s, exit_m=exit_m, y=y, z=z)
-    v_lag = _lag_step(v0, (vs, vy, vz))
-    # Lead along +s so the force loop always has forward bite toward the exit.
-    # In the final metre while off-axis, shorten the lead — punch only once centered.
-    if _final_gate(s, y, z):
-        lead = LEAD_S_FINAL
-    else:
-        lead = max(LEAD_S_M, float(speed_cap) * LEAD_S_T)
-    s_ref = min(exit_m, s + max(v_lag[0], 0.0) * DT + lead)
-    # Soft axis capture far out; hard-lock the opening centreline in the final
-    # metre so residual lateral does not walk the hull onto the rim.
-    if -FINAL_S_M <= s < 0.4:
-        keep = FINAL_KEEP
-    elif s < 0.0:
-        keep = AXIS_KEEP
-    else:
-        keep = AXIS_KEEP_EXIT
-    y_ref = y * keep + v_lag[1] * DT
-    z_ref = z * keep + v_lag[2] * DT
-    point = tuple(
-        float(center[i]) + s_ref * fwd[i] + y_ref * left[i] + z_ref * up[i]
-        for i in range(3)
+    # One law for the whole approach. Forward speed falls continuously when
+    # the depth cannot be closed before the plane; there is no dive-in-place
+    # switch to chatter on.
+    dist_exit = exit_m - float(s)
+    if dist_exit <= 0.0 and abs(float(z)) <= DEPTH_HOLD_M:
+        return pack(exit_pt, stopped, stopped, "through", exit_m, False)
+    # One continuous run-in. Lateral and depth rates are always present and
+    # forward speed falls only as much as needed to close both errors before
+    # the plane. There is no branch at a tube radius and no reverse command.
+    scale = max(0.45, 1.0 - off_axis / 0.50)
+    dist_plane = max(0.0, -float(s)) if float(s) < 0.0 else None
+    vel = _axis_velocity(
+        y, z, max(0.0, dist_exit), 1.0, cruise * scale,
+        fwd, left, up, dist_plane, vy_meas,
     )
-    vel = tuple(v_lag[0] * fwd[i] + v_lag[1] * left[i] + v_lag[2] * up[i] for i in range(3))
-    return {
-        "point": point,
-        "vel": vel,
-        "s": s_ref,
-        "y": y_ref,
-        "z": z_ref,
-        "warm": best_U,
-        "cost": best_cost,
-        "u0": (vs, vy, vz),
-        "v_lag": v_lag,
-        "state0": (s, y, z),
-        "fwd": fwd,
-        "left": left,
-        "up": up,
-        "in_tube": tube_ok(y, z),
-        "final_gate": _final_gate(s, y, z),
-    }
+    point = exit_pt if dist_exit <= 0.0 else _lead_point(pos, vel)
+    mode = "approach" if float(s) < 0.0 else "through"
+    return pack(
+        point, vel, stopped, mode,
+        float(s) + _along_lead(vel, fwd), False,
+    )

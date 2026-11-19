@@ -43,6 +43,8 @@ copy_in "$HERE/model/heron/model.sdf"             $N/heron_model.sdf
 copy_in "$HERE/model/heron/model.config"          $N/heron_model.config
 copy_in "$HERE/model/heron/meshes/tag_plane.obj"  $N/tag_plane.obj
 copy_in "$HERE/model/heron/materials/textures/apriltag36h11_10.png" $N/apriltag36h11_10.png
+copy_in "$HERE/model/heron/materials/textures/apriltag36h11_11.png" $N/apriltag36h11_11.png
+copy_in "$HERE/model/heron/materials/textures/apriltag36h11_12.png" $N/apriltag36h11_12.png
 copy_in "$HERE/world/kiwanis_lake.sdf"            $N/kiwanis_lake.sdf
 for f in "$HERE"/test/*.py "$HERE"/test/*.sh; do
   if [ -f "$f" ]; then copy_in "$f" "$N/test/$(basename "$f")"; fi

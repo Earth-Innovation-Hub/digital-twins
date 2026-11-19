@@ -58,6 +58,16 @@ GLIDE_HALF_TIP_M = 1.50           # lateral half-width at the deep tip
 GLIDE_HALF_THR_M = 0.28           # lateral half-width at weld threshold
 GLIDE_SPEED_MPS = 0.42            # along-track cruise on the slope
 GLIDE_FLARE_MPS = 0.12            # crawl in flare
+GLIDE_BRAKE_S = 0.50              # begin a continuous flare before the phase gate
+# Fly-through capture under the nest (latch stage).
+CAPTURE_ALONG_M = 0.25            # depth of the capture line below the nest
+CAPTURE_MPS = 0.15                # crawl through the weld sphere
+CAPTURE_LEAD_M = 0.40
+CAPTURE_MISS_FWD_M = 0.55         # this far ahead of the nest: missed, go around
+CAPTURE_MISS_LAT_M = 1.0
+# Heading offset from the boat heading while steering onto the centreline.
+GLIDE_HEADING_OFF = math.radians(30.0)
+CAPTURE_HEADING_OFF = math.radians(18.0)   # stays inside the 28 deg ATTACH yaw gate
 # Local loiter under the nest only if the up-cam has not locked yet.
 UNDER_SPIRAL_R0_M = 0.6
 UNDER_SPIRAL_R_MAX_M = 2.0
@@ -347,15 +357,21 @@ def glide_half_m(s, half_tip=GLIDE_HALF_TIP_M, half_thr=GLIDE_HALF_THR_M):
 
 
 def glide_speed_mps(s, cruise=GLIDE_SPEED_MPS, flare=GLIDE_FLARE_MPS,
-                    flare_s=GLIDE_FLARE_S):
-    """Along-track speed schedule: cruise early, crawl in flare."""
+                    flare_s=GLIDE_FLARE_S, brake_s=GLIDE_BRAKE_S,
+                    latch_s=GLIDE_LATCH_S):
+    """Continuous along-track speed schedule with a smooth flare.
+
+    The old piecewise schedule dropped directly to ``flare`` at ``flare_s``.
+    That velocity step was visible as a force spike and encouraged the hull to
+    leave the narrowing tube.  Brake over a useful portion of the glide and
+    arrive at crawl speed before the latch gate instead.
+    """
     u = max(0.0, min(1.0, float(s)))
-    fs = max(0.05, float(flare_s))
-    if u < fs:
-        # Ease from cruise toward flare speed as s→flare_s.
-        t = u / fs
-        return float(cruise) + t * (float(flare) - float(cruise)) * 0.55
-    return float(flare)
+    start = min(float(flare_s), max(0.0, float(brake_s)))
+    end = max(start + 0.05, float(latch_s))
+    t = max(0.0, min(1.0, (u - start) / (end - start)))
+    smooth = t * t * (3.0 - 2.0 * t)
+    return float(cruise) + (float(flare) - float(cruise)) * smooth
 
 
 def project_onto_glide(auv_pos, boat_pos, boat_q,
@@ -446,7 +462,14 @@ def glide_corridor(auv_pos, boat_pos, boat_q,
         phase = "latch"
     elif s >= float(flare_s) and near_tube:
         phase = "flare"
-    elif tip_ok or (slope_sticky and near_tube and s > 0.0):
+    elif tip_ok or (
+        slope_sticky and dist_thr <= float(aft_m) + 1.5
+    ):
+        # Once committed, an excursion through the tapered tube wall must
+        # intercept the local (clamped) centreline.  This also covers a raw
+        # projection just beyond the threshold as the boat moves. Returning to
+        # ``approach`` sends the reference six metres back to the aft tip and
+        # caused repeated reverse thrust / 20--39 N force spikes.
         phase = "glide"
     elif prev == "glide" and near_tube and dist_tip <= float(aft_m) + 1.5:
         phase = "glide"
@@ -474,6 +497,7 @@ def glide_corridor(auv_pos, boat_pos, boat_q,
         "dist_aft": dist_tip,    # alias
         "dist_threshold": dist_thr,
         "dist_under": dist_thr,  # alias for warm-start
+        "closest": proj["closest"],
         "speed_mps": glide_speed_mps(s),
         "station": glide_station(
             s, boat_pos, boat_q, aft_m=aft_m, depth_m=depth_m, standoff_m=standoff_m,
@@ -575,6 +599,67 @@ def cone_state(auv_pos, auv_q, boat_pos, boat_q, scale: float = 1.0):
         "off_axis": off, "yaw": yaw, "tilt": tilt, "inside": inside, "weld": weld,
         "fwd": b_fwd, "left": b_left,
     }
+
+
+def boat_yaw(boat_q) -> float:
+    fwd = axes(boat_q)[0]
+    return math.atan2(fwd[1], fwd[0])
+
+
+def centreline_heading(auv_pos, boat_pos, boat_q, lookahead_m, max_off_rad,
+                       lat_rate: float = 0.0, damp_s: float = 0.0):
+    """Heading that steers a body-x-only hull onto the boat's centreline.
+
+    The glide and the capture both run along the boat's x axis through the
+    nest, so the line is the boat heading through the nest. Steering at a
+    look-ahead point on the line (bounded offset from the boat heading) is
+    stable for a hull that cannot side-slip; aiming at a point under the nest
+    is not, because the bearing to it swings as the hull passes and the hull
+    circles it. Returns (yaw, left offset of the hull from the line).
+    """
+    _f, left, _u = nest_body_offset(auv_pos, boat_pos, boat_q)
+    off = -math.atan2(float(left) + float(damp_s) * float(lat_rate), max(0.1, float(lookahead_m)))
+    lim = abs(float(max_off_rad))
+    off = max(-lim, min(lim, off))
+    return boat_yaw(boat_q) + off, left
+
+
+def capture_reference(auv_pos, boat_pos, boat_q, heading, speed=CAPTURE_MPS,
+                      along_m=CAPTURE_ALONG_M, lead_m=CAPTURE_LEAD_M, vz_max=0.12):
+    """Fly-through capture: move along ``heading`` at ``along_m`` below the nest.
+
+    No station is held under the nest. The hull keeps crawling forward on the
+    centreline, and ATTACH fires while it passes through the weld sphere.
+    A hull that enters deep crawls slower so it climbs into the sphere before
+    it passes under the nest.
+    Returns (world point, nest-relative world velocity).
+    """
+    up = axes(boat_q)[2]
+    _f, _l, u = nest_body_offset(auv_pos, boat_pos, boat_q)
+    below = -float(u)
+    dz = max(-0.20, min(0.20, below - float(along_m)))   # >0: too deep, rise
+    vz = max(-vz_max, min(vz_max, 0.6 * (below - float(along_m))))
+    excess = max(0.0, below - float(along_m) - 0.10)
+    speed = float(speed) * max(0.3, 1.0 - excess / 0.5)
+    c, s = math.cos(heading), math.sin(heading)
+    point = tuple(
+        float(auv_pos[i]) + float(lead_m) * (c, s, 0.0)[i] + dz * up[i] for i in range(3)
+    )
+    vel = tuple(float(speed) * (c, s, 0.0)[i] + vz * up[i] for i in range(3))
+    return point, vel
+
+
+def capture_missed(auv_pos, boat_pos, boat_q,
+                   fwd_m=CAPTURE_MISS_FWD_M, lat_m=CAPTURE_MISS_LAT_M, deep_m=1.2):
+    """True once the hull is past the weld sphere or clearly off the line."""
+    f, left, u = nest_body_offset(auv_pos, boat_pos, boat_q)
+    if f > float(fwd_m):
+        return "past"
+    if abs(left) > float(lat_m):
+        return "wide"
+    if -u > float(deep_m):
+        return "deep"
+    return None
 
 
 def dock_goal(cone, along_now: float, dt: float, climb_mps: float = DOCK_CLIMB_MPS):

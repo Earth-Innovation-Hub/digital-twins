@@ -555,6 +555,11 @@ class UdroneHelixController(Node):
         self._hold_point = None      # world (x, y, z) flown while handing off
         self._handoff_t = None
         self._p_des = None           # world reference of the last control step
+        # Pick nose-down forward thrust or nose-up reverse thrust from the
+        # commanded speed along the heading, not the instantaneous force.
+        # Off by default; a runner that wants it sets it.
+        self.elev_from_command = False
+        self._v_des_w = None
         self.hud_preview = True      # draw the next seconds of the reference on the HUD
         self.hud = None
         if os.environ.get("UDRONE_HUD", "1") != "0":
@@ -635,6 +640,13 @@ class UdroneHelixController(Node):
     def _fail(self, why: str):
         print(f"FAIL {why}", flush=True)
         self.failed = why
+        # Disarm instead of leaving an armed gap for a chained next step.
+        try:
+            self._publish_setpoints(0.0, 0.0, 0.0, 0.0)
+            self._stop_vehicle()
+            self._drop_baton()
+        except Exception:
+            pass
         self.done = True
 
     def _stop_vehicle(self):
@@ -900,6 +912,7 @@ class UdroneHelixController(Node):
                 self._publish_setpoints(0.0, 0.0, 0.0, 0.0)
                 self._stop_vehicle()
                 self._drop_baton()
+                self.failed = self.failed or "handoff_timeout"
                 self.done = True
                 return
             thrust, roll_u, pitch_u, yaw_u = UdroneHelixController._control(self, tm, auv, boat)
@@ -989,6 +1002,7 @@ class UdroneHelixController(Node):
         v_des = (c * vx_p - s * vy_p, s * vx_p + c * vy_p, vz_p)
         a_w = (c * ax_p - s * ay_p, s * ax_p + c * ay_p, az_p)
         self._p_des = p_des
+        self._v_des_w = v_des
         err = tuple(a - b for a, b in zip(p_des, pos))
         self._err_n = norm(err)
         if self._hold_point is None:
@@ -1103,7 +1117,18 @@ class UdroneHelixController(Node):
         # downward force. Near vertical, keep the one already in use rather
         # than pitching across as the small forward part changes sign.
         sign = 1.0 if along >= 0.0 else -1.0
-        if self._elev_sign is not None and sign != self._elev_sign \
+        if self.elev_from_command and self._v_des_w is not None:
+            # A small velocity overshoot flips the force along the heading
+            # every second or two. Swapping sides each time swings the nose
+            # ~90° and the thrust points the wrong way while it swings.
+            cmd_along = self._v_des_w[0] * hx + self._v_des_w[1] * hy
+            if cmd_along > 0.03:
+                sign = 1.0
+            elif cmd_along < -0.03:
+                sign = -1.0
+            elif self._elev_sign is not None:
+                sign = self._elev_sign
+        elif self._elev_sign is not None and sign != self._elev_sign \
                 and abs(along) < ELEV_KEEP * abs(force[2]):
             sign = self._elev_sign
         self._elev_sign = sign
