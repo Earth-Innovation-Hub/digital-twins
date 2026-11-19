@@ -176,7 +176,7 @@ Commands:
 |---|---|---|
 | `goto` / `survey` | otter_k | surface leg / 2D lawnmower; `until: tag_detected` stops early |
 | `helix` | xudrone | forward helix (force → point-hull-axis) |
-| `swim` | xudrone | one straight leg on that same force loop. `depth_m` is metres below the surface; omit it to keep the depth at arm. Rejected while latched |
+| `swim` | xudrone | one straight leg flown by line-of-sight guidance (`behaviours/los_guidance.py`): turn in place onto the line, then a surge speed loop that ramps up and brakes onto the end point, with heading and pitch steering on the cross-track and depth error. `depth_m` is metres below the surface; omit it to keep the depth at arm. `UDRONE_SWIM_GUIDANCE=track` flies the older timed reference on the force loop. Rejected while latched |
 | `hoop` | xudrone | Front-camera search. The grid dives before it translates. A closed ring that matches the authored hoop starts one pursuit reference (the image does not have to be centered): dive in place, slide onto the centreline, cruise at 0.32 m/s, brake to a stop at the exit. The nose stays free. The through-direction is frozen at entry. A pass is one authored sample inside the opening (radial ≤ 0.40 m) and later arrival within 0.6 m of the frozen exit. `hoop_done` carries that verdict (`hoop_pass`, plane, exit miss). Rejected while latched. HUD: `/xudrone/hud/image` |
 | `track` | xudrone | hold about 1 m under otter_k. The upward camera watches deck tag 10; the boat pose predicts the station and the tag corrects it. Phrase `xudrone: track otter_k`. Rejected while latched |
 | `search_otter` | xudrone | Aft station → expanding sine until under the nest → lock deck tag 10 (up-cam) — no latch. Chain with `rendezvous`. Phrase `xudrone, search for otter_k` |
@@ -322,6 +322,26 @@ docker exec -e UDRONE_HELIX_DUR=30 -e UDRONE_HELIX_R=0.6 \
 
 Logs: `/tmp/udrone_helix_ctrl_log.txt`, `/tmp/udrone_undock_helix_log.txt`.
 Exit status **0 = PASS**, **1 = FAIL** (printed `CHECKS` / `VERDICT`).
+
+Every run on the controller, CoRAL behaviours included, also writes a
+trajectory record that later runs do not overwrite (`behaviours/traj_log.py`):
+
+```text
+/root/log/udrone_runs/<YYYYmmdd_HHMMSS>_<skill>_<pid>/
+    traj.csv       one row per control tick, world ENU (pose, velocity, reference,
+                   errors, force, hull direction, commands, pose source, boat; LOS
+                   runs add cross-track, depth off the line, speed reference)
+    events.jsonl   start, path, odom_reject, settle, arrive, fail, done, handoff, end
+    summary.json   error mean/max, saturation, nose limits, speed, travel, verdict
+/root/log/udrone_runs/index.jsonl   one summary line per run (newest 300 runs kept)
+```
+
+```bash
+docker exec digital-twin-aquatic python3 /root/udrone_boat/behaviours/traj_report.py            # recent runs
+docker exec digital-twin-aquatic python3 /root/udrone_boat/behaviours/traj_report.py latest:swim --plot /tmp/swim.png
+```
+
+`UDRONE_RUN_LOG=0` turns the records off; `UDRONE_RUN_LOG_DIR` moves them.
 
 ### Helix controller (design)
 

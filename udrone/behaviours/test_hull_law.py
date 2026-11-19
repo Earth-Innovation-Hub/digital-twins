@@ -18,7 +18,7 @@ hull_dir = c.UdroneHelixController._hull_dir
 
 def state(limit=math.radians(45.0), yaw_hold=None, head=None):
     return SimpleNamespace(pitch_limit=limit, yaw_hold=yaw_hold, _head=head,
-                           _elev_sign=None, _dir=None)
+                           _elev_sign=None, _dir=None, elev_from_command=False, _v_des_w=None)
 
 
 def elev(d):
@@ -100,4 +100,29 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # Trim: a little positive, well under the old 2 N.
 assert 0.1 < c.NET_BUOYANCY_N < 0.6, c.NET_BUOYANCY_N
+
+# Steering onto a direction: left of the nose yaws left, below it pitches
+# nose down, both within the torque limits.
+steer = c.UdroneHelixController._steer_hull
+still = SimpleNamespace(w_body=(0.0, 0.0, 0.0))
+LEFT, UP = (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+p_u, y_u = steer(still, (0.0, 1.0, 0.0), LEVEL_EAST, LEFT, UP, 1.0)
+assert y_u > 0.0 and abs(y_u) <= c.TORQUE_MAX_YAW and abs(p_u) < 1e-9, (p_u, y_u)
+k = math.sqrt(0.5)
+p_u, y_u = steer(still, (k, 0.0, -k), LEVEL_EAST, LEFT, UP, 1.0)
+assert p_u > 0.0 and abs(p_u) <= c.TORQUE_MAX and abs(y_u) < 1e-9, (p_u, y_u)
+
+# The base loop calls these through self, so a runner method of the same name
+# replaces them (run_hoop's own _steer once broke every hoop this way).
+import ast
+import glob
+BASE_ONLY = {"_steer_hull", "_update_motion", "_control_los", "_trace_row", "_trace_extra",
+             "trace_event", "finish_trace"}
+here = os.path.dirname(os.path.abspath(__file__))
+for path in glob.glob(os.path.join(here, "run_*.py")):
+    tree = ast.parse(open(path).read())
+    defs = {n.name for cls in tree.body if isinstance(cls, ast.ClassDef)
+            for n in cls.body if isinstance(n, ast.FunctionDef)}
+    clash = defs & BASE_ONLY
+    assert not clash, f"{os.path.basename(path)} overrides base helpers {sorted(clash)}"
 print("hull law ok")

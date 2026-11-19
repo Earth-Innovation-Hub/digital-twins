@@ -7,7 +7,7 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 |---|---|---|
 | (in-process) | `dock`, `goto`, `survey`, `hold`, `abort` | boat + latch |
 | `run_helix.py` | `helix` | AUV forward helix |
-| `run_swim.py` | `swim` | AUV straight leg (compass, world, or along heading) |
+| `run_swim.py` | `swim` | AUV straight leg (compass, world, or along heading) on line-of-sight guidance (`los_guidance.py`); `UDRONE_SWIM_GUIDANCE=track` flies the old timed path |
 | `run_hoop.py` | `hoop` | Front-camera search. An authored-ring match starts the corridor (image need not be centered) → hold the gate with no along-track speed → 0.6 m/s surge that stops at the exit. Pass is `hoop_pass`; verdict on `hoop_done` |
 | `run_track_otter.py` | `track` | Hold under otter_k on deck tag 10 (`track_geom.py`) |
 | `run_search_otter.py` | `search_otter` | Aft station → expanding sine → under nest → lock deck tag 10 (up-cam); no latch; chain with `rendezvous` |
@@ -22,7 +22,15 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | `coverage_plan.py` | (used by mapper / `coverage --plan map`) | Map-aware boustrophedon over costmap gaps |
 
 Helix, swim, hoop, track, and coverage share `UdroneHelixController` (force → point-hull-axis).
-`swim` is one polyline leg. `hoop` (`hoop_geom.py`, `hoop_mpc.py`) covers a
+`swim` is one leg flown by line of sight (`los_guidance.LosGuide`). There is
+no time-indexed reference. The heading and pitch steer onto the line, and the
+speed loop turns in place first, then ramps up and brakes onto the end point.
+If the hull stops outside the arrival radius, the force loop settles it on the
+end point. Every runner writes a per-run trajectory record
+(`traj_log.py`) under `/root/log/udrone_runs/<stamp>_<skill>_<pid>/`:
+`traj.csv`, `events.jsonl`, `summary.json`, and a line in `index.jsonl`.
+`traj_report.py` lists recent runs and prints or plots one run
+(`traj_report.py latest:swim --plot /tmp/swim.png`). `hoop` (`hoop_geom.py`, `hoop_mpc.py`) covers a
 dock-centred grid and finishes the dive before the leg translates. A closed
 ring that matches the authored hoop starts one pursuit reference: dive in
 place, slide onto the centreline, then cruise at 0.32 m/s and brake to a

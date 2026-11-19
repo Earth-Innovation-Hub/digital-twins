@@ -206,8 +206,22 @@ def _maneuver_power():
     return maneuver_power
 
 
+def _behaviour_module(name):
+    here = os.path.dirname(os.path.abspath(__file__))
+    for folder in (here, os.path.abspath(os.path.join(here, "..", "behaviours"))):
+        if os.path.isfile(os.path.join(folder, f"{name}.py")) and folder not in sys.path:
+            sys.path.insert(0, folder)
+    return __import__(name)
+
+
+def _skill_name():
+    base = os.path.splitext(os.path.basename(sys.argv[0] if sys.argv else ""))[0]
+    return base[4:] if base.startswith("run_") else (base or "helix")
+
+
 _pf = _pose_frame()
 _mp = _maneuver_power()
+_tl = _behaviour_module("traj_log")
 ned_to_enu = _pf.ned_to_enu
 px4_q_to_enu = _pf.px4_q_to_enu
 
@@ -560,6 +574,16 @@ class UdroneHelixController(Node):
         # Off by default; a runner that wants it sets it.
         self.elev_from_command = False
         self._v_des_w = None
+        # LOS waypoint guidance (los_guidance.LosGuide). A runner that sets it
+        # flies _control_los instead of the time-indexed reference.
+        self.los = None
+        self._los_g = None
+        # Per-run trajectory record (traj_log.TrajLog), opened at thrust on.
+        self.trace = None
+        self.trace_skill = _skill_name()
+        self.trace_extra_cols = ()
+        self.trace_meta = {}
+        self.trace_mode = None       # row label override, e.g. "settle"
         self.hud_preview = True      # draw the next seconds of the reference on the HUD
         self.hud = None
         if os.environ.get("UDRONE_HUD", "1") != "0":
@@ -603,7 +627,54 @@ class UdroneHelixController(Node):
         self.pose_source, self._vel_meas, self._gz_miss = f.source, f.vel, f.gz_miss
         if f.rejected and (f.rejects == 1 or f.rejects % 40 == 0):
             print(f"ODOM_CHECK reject dist={f.gz_miss:.2f} m, flying gazebo", flush=True)
+            self.trace_event("odom_reject", dist=f.gz_miss, rejects=f.rejects)
         return pos, q
+
+    # ---- trajectory record ----------------------------------------------
+    def trace_event(self, kind: str, **fields):
+        if self.trace is not None:
+            tm = None if self.t_thrust0 is None or self._prev is None else self._prev[0] - self.t_thrust0
+            self.trace.event(kind, t=tm, **fields)
+
+    def finish_trace(self, outcome: str, **fields):
+        """Close the run record with the verdict. Safe to call twice."""
+        if self.trace is None:
+            return None
+        summary = self.trace.close(outcome, failed=self.failed or None, **fields)
+        self.trace = None
+        return summary
+
+    def _trace_row(self, tm, pos, fwd, rpy, p_des, v_des, force, thrust, pitch_u, yaw_u, boat, extra=None):
+        if self.trace is None:
+            return
+        nan = float("nan")
+        p_des = p_des or (nan, nan, nan)
+        v_des = v_des or (nan, nan, nan)
+        force = force or (nan, nan, nan)
+        d = self._dir or (nan, nan, nan)
+        bw = boat[0] if boat is not None else (nan, nan, nan)
+        row = {
+            "t": tm, "sim_t": self.t_thrust0 + tm,
+            "mode": "handoff" if self._hold_point is not None else (
+                self.trace_mode or ("los" if self.los is not None else "track")),
+            "x": pos[0], "y": pos[1], "z": pos[2],
+            "vx": self.vel[0], "vy": self.vel[1], "vz": self.vel[2], "u_fwd": dot(self.vel, fwd),
+            "roll": rpy[0], "pitch": rpy[1], "yaw": rpy[2],
+            "x_des": p_des[0], "y_des": p_des[1], "z_des": p_des[2],
+            "vx_des": v_des[0], "vy_des": v_des[1], "vz_des": v_des[2],
+            "err": math.dist(p_des, pos), "herr": math.hypot(p_des[0] - pos[0], p_des[1] - pos[1]),
+            "zerr": pos[2] - p_des[2],
+            "fx": force[0], "fy": force[1], "fz": force[2], "fn": norm(force),
+            "dir_x": d[0], "dir_y": d[1], "dir_z": d[2],
+            "thrust": thrust, "pitch_u": pitch_u, "yaw_u": yaw_u, "power": self.power,
+            "gate": self._gate_rate, "path_t": self.path_t, "depth_i": self.depth_i,
+            "pose_src": self.pose_source, "gz_miss": self._gz_miss,
+            "latch": self.latch.code(), "rotor0_n": self.probe.newtons(),
+            "boat_x": bw[0], "boat_y": bw[1], "boat_z": bw[2],
+        }
+        if extra:
+            row.update(extra)
+        self.trace.row(row)
 
     # ---- hooks for subclasses -------------------------------------------
     def _events(self, tm: float):
@@ -640,6 +711,7 @@ class UdroneHelixController(Node):
     def _fail(self, why: str):
         print(f"FAIL {why}", flush=True)
         self.failed = why
+        self.trace_event("fail", why=why)
         # Disarm instead of leaving an armed gap for a chained next step.
         try:
             self._publish_setpoints(0.0, 0.0, 0.0, 0.0)
@@ -718,6 +790,10 @@ class UdroneHelixController(Node):
             f"THRUST_ON t={t:.1f} {how} anchor=({x:.2f},{y:.2f}) yaw={yaw:.2f} "
             f"helix R={self.radius} w={self.omega}", flush=True,
         )
+        if self.trace is None:
+            meta = {"model": self.gz_model, "how": how, "anchor": (x, y, yaw), "power": self.power}
+            meta.update(self.trace_meta)
+            self.trace = _tl.TrajLog(self.trace_skill, self.trace_extra_cols, meta)
 
     def _can_hand_off(self) -> bool:
         return (
@@ -737,6 +813,9 @@ class UdroneHelixController(Node):
         self.progress_gate = False
         self.pitch_limit = PITCH_MAX_RAD
         self._head = yaw
+        self.los = None
+        self._los_g = None
+        self.trace_event("handoff", hold=self._hold_point, yaw=yaw)
         self._write_baton()
         env = {
             **os.environ,
@@ -922,6 +1001,7 @@ class UdroneHelixController(Node):
 
             if self._finished(tm):
                 print(f"DONE thrust_elapsed={tm:.1f}s (sim)", flush=True)
+                self.trace_event("done", pos=pos, failed=self.failed or None)
                 if self._can_hand_off():
                     self._begin_handoff(pos, yaw)
                 else:
@@ -957,22 +1037,7 @@ class UdroneHelixController(Node):
         x, y, z = pos
         fwd, left, up = body_axes(q)
         sim_t = self.t_thrust0 + tm
-
-        # Body rates from the attitude. Velocity is the estimator's when the
-        # sim check accepted it, otherwise a difference of the pose.
-        dt = 0.05
-        if self._prev is None:
-            self._prev = (sim_t, pos, q)
-        elif sim_t > self._prev[0] + 1e-3:
-            dt = sim_t - self._prev[0]
-            v_raw = tuple((a - b) / dt for a, b in zip(pos, self._prev[1]))
-            w_raw = body_rates(self._prev[2], q, dt)
-            if self._vel_meas is None:
-                self.vel = tuple(0.5 * a + 0.5 * b for a, b in zip(self.vel, v_raw))
-            self.w_body = tuple(0.5 * a + 0.5 * b for a, b in zip(self.w_body, w_raw))
-            self._prev = (sim_t, pos, q)
-        if self._vel_meas is not None:
-            self.vel = self._vel_meas
+        dt = self._update_motion(sim_t, pos, q)
 
         # Desired point on the path, path frame -> world. A third tuple is the
         # path acceleration. Helix, swim, and coverage omit it. With the
@@ -1042,20 +1107,12 @@ class UdroneHelixController(Node):
         roll_u = pitch_u = yaw_u = 0.0
         if not docked:
             self._dir = self._hull_dir(force, fwd, fn)
-            # Turn the hull axis onto the force direction. The error is the
-            # rotation vector from one to the other, resolved on the body axes.
-            rot = cross(fwd, self._dir)
-            if dot(fwd, self._dir) < 0.0:       # more than 90 deg off: full error
-                rn = norm(rot)
-                rot = tuple(r / rn for r in rot) if rn > 1e-6 else left
-            tq_p = TORQUE_MAX * gs
-            tq_y = TORQUE_MAX_YAW * gs
-            pitch_u = clamp(
-                KP_PITCH * gs * dot(rot, left) - KD_PITCH * self.w_body[1] - GRAVITY_FF * fwd[2], tq_p)
-            yaw_u = clamp(KP_YAW * gs * dot(rot, up) - KD_YAW * self.w_body[2], tq_y)
+            pitch_u, yaw_u = self._steer_hull(self._dir, fwd, left, up, gs)
 
         # Log in the path frame.
         roll, pitch, yaw = rpy_from_q(q)
+        self._trace_row(tm, pos, fwd, (roll, pitch, yaw), p_des, v_des, force,
+                        thrust, pitch_u, yaw_u, boat, self._trace_extra())
         xp, yp = self._path_xy(x, y)
         yaw_p = wrap_pi(yaw - yaw0)
         e3 = norm(err)
@@ -1082,6 +1139,116 @@ class UdroneHelixController(Node):
                 flush=True,
             )
         return thrust, roll_u, pitch_u, yaw_u
+
+    def _update_motion(self, sim_t, pos, q):
+        """Body rates from the attitude; velocity from the estimator when the
+        sim check accepted it, otherwise a difference of the pose. Returns dt."""
+        dt = 0.05
+        if self._prev is None:
+            self._prev = (sim_t, pos, q)
+        elif sim_t > self._prev[0] + 1e-3:
+            dt = sim_t - self._prev[0]
+            v_raw = tuple((a - b) / dt for a, b in zip(pos, self._prev[1]))
+            w_raw = body_rates(self._prev[2], q, dt)
+            if self._vel_meas is None:
+                self.vel = tuple(0.5 * a + 0.5 * b for a, b in zip(self.vel, v_raw))
+            self.w_body = tuple(0.5 * a + 0.5 * b for a, b in zip(self.w_body, w_raw))
+            self._prev = (sim_t, pos, q)
+        if self._vel_meas is not None:
+            self.vel = self._vel_meas
+        return dt
+
+    def _steer_hull(self, direction, fwd, left, up, gs):
+        """Pitch and yaw commands that turn the hull axis onto direction. The
+        error is the rotation vector from one to the other on the body axes."""
+        rot = cross(fwd, direction)
+        if dot(fwd, direction) < 0.0:       # more than 90 deg off: full error
+            rn = norm(rot)
+            rot = tuple(r / rn for r in rot) if rn > 1e-6 else left
+        pitch_u = clamp(
+            KP_PITCH * gs * dot(rot, left) - KD_PITCH * self.w_body[1] - GRAVITY_FF * fwd[2],
+            TORQUE_MAX * gs)
+        yaw_u = clamp(KP_YAW * gs * dot(rot, up) - KD_YAW * self.w_body[2], TORQUE_MAX_YAW * gs)
+        return pitch_u, yaw_u
+
+    LOS_TRACE_COLUMNS = (
+        "leg", "s", "rem", "xte", "vte", "psi_cmd", "gamma_cmd", "head_err", "surge_gate",
+        "u_t", "u_ref", "a_ref", "lookahead", "elev_i", "dist_end", "reverse",
+    )
+
+    def _trace_extra(self):
+        """Runner-specific columns for the trajectory record (trace_extra_cols)."""
+        g = self._los_g
+        if g is None:
+            return None
+        # err / herr / zerr are the distance from the line, not from the aim
+        # point, which sits one look-ahead in front of the hull by design.
+        return {
+            "err": math.hypot(g["xte"], g["vte"]), "herr": abs(g["xte"]), "zerr": g["vte"],
+            "leg": g["leg"], "s": g["s"], "rem": g["rem"], "xte": g["xte"], "vte": g["vte"],
+            "psi_cmd": g["psi"], "gamma_cmd": g["gamma"], "head_err": g["herr"],
+            "surge_gate": g["gate"], "u_t": g["u_t"], "u_ref": g["u_ref"], "a_ref": g["a_ref"],
+            "lookahead": g["delta"], "elev_i": g["elev_i"], "dist_end": g["dist_end"],
+            "reverse": g["reverse"],
+        }
+
+    def _control_los(self, tm, auv, boat):
+        """One LOS step: heading and pitch from self.los, thrust from a surge
+        speed loop (drag at the reference speed, plus the speed error and the
+        reference acceleration). Nothing here depends on the thrust clock."""
+        pos, q = auv
+        fwd, left, up = body_axes(q)
+        sim_t = self.t_thrust0 + tm
+        dt = self._update_motion(sim_t, pos, q)
+        roll, pitch, yaw = rpy_from_q(q)
+        g = self.los.step(pos, yaw, dt, elev=math.asin(clamp(fwd[2], 1.0)))
+        self._los_g = g
+        gs = _mp.gain_scale(self.power)
+        u = dot(self.vel, fwd)
+        u_ref = g["u_ref"]
+        drag = DRAG_LIN[0] * u_ref + DRAG_QUAD[0] * u_ref * abs(u_ref)
+        f_x = MASS_KG * (KV * gs * (u_ref - u) + self.power * g["a_ref"]) + drag
+        f_x -= NET_BUOYANCY_N * fwd[2]
+        thrust = clamp(f_x / SURGE_N_PER_UNIT, self.power)
+        self._last_thrust = float(thrust)
+        carrot = g["carrot"]
+        self._p_des = carrot
+        self._v_des_w = tuple(u_ref * c for c in g["dir"])
+        self._err_n = math.hypot(g["xte"], g["vte"])
+        self._last_herr = abs(g["xte"])
+        self._gate_rate = g["gate"]
+        pitch_u = yaw_u = 0.0
+        if self.latch.state != "attached":
+            self._dir = g["dir"]
+            pitch_u, yaw_u = self._steer_hull(self._dir, fwd, left, up, gs)
+        force = tuple(f_x * c for c in fwd)
+        self._trace_row(tm, pos, fwd, (roll, pitch, yaw), carrot, self._v_des_w, force,
+                        thrust, pitch_u, yaw_u, boat, self._trace_extra())
+        xp, yp = self._path_xy(pos[0], pos[1])
+        xd, yd = self._path_xy(carrot[0], carrot[1])
+        nan = float("nan")
+        bx = by = bz = rx = ry = rz = nan
+        if boat is not None:
+            (wbx, wby, bz), bq = boat
+            bx, by = self._path_xy(wbx, wby)
+            rx, ry, rz = rotate_inverse(bq, (pos[0] - wbx, pos[1] - wby, pos[2] - bz))
+        self.log.append((
+            tm, xp, yp, pos[2], xd, yd, carrot[2], thrust, yaw_u, pitch_u,
+            wrap_pi(yaw - self.anchor[2]), roll, bx, by, bz, rx, ry, rz,
+            self.probe.newtons(), self.latch.code(),
+        ))
+        if tm >= self.next_print:
+            self.next_print = tm + 2.0
+            print(
+                f"t={tm:5.1f} LOS leg={g['leg']} s={g['s']:.2f} rem={g['rem']:.2f} "
+                f"xte={g['xte']:+.2f} vte={g['vte']:+.2f} head_err={math.degrees(g['herr']):+.0f} deg "
+                f"u={u:+.2f}/{u_ref:+.2f} m/s gate={g['gate']:.2f} thrust={thrust:+.3f} "
+                f"nose-down={math.degrees(math.asin(clamp(-fwd[2], 1.0))):.0f} deg "
+                f"z={pos[2]:.2f} end={g['dist_end']:.2f} m "
+                f"pose={self.pose_source} gz_miss={self._gz_miss:.2f}",
+                flush=True,
+            )
+        return thrust, 0.0, pitch_u, yaw_u
 
     def _hull_dir(self, force, fwd, fn):
         """Unit vector the hull axis should point along for this force.
@@ -1164,6 +1331,11 @@ class UdroneHelixController(Node):
             for row in self.log:
                 f.write(" ".join(f"{v:.6f}" for v in row) + "\n")
         print(f"wrote {path} n={len(self.log)}", flush=True)
+        if self.trace is not None:
+            run_dir = self.trace.dir
+            self.finish_trace("fail" if self.failed else "ended")
+            if run_dir:
+                print(f"TRAJ_LOG closed {run_dir}", flush=True)
 
     def pose_rate_hz(self):
         """Pose messages per wall second since start."""
