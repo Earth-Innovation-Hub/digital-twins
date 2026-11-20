@@ -24,9 +24,9 @@
 
 \begin{document}
 
-\title{CoRAL: Language-Specified Joint Missions of an\\
-Autonomous Surface Vehicle and an Underactuated AUV\\
-in the Kiwanis Lake Digital Twin}
+\title{CoRAL: Language-Specified Joint Missions\\
+of an Autonomous Surface Vehicle\\
+and an Autonomous Underwater Vehicle}
 
 \author{\IEEEauthorblockN{Jnaneshwar Das}
 \IEEEauthorblockA{\textit{Earth Innovation Hub / DREAMS Lab}\\
@@ -38,7 +38,7 @@ jdas@earthinnovationhub.org}
 \maketitle
 
 \begin{abstract}
-We describe \CoRAL{}, a closed loop that turns a spoken joint mission into typed behaviours for a surface vehicle and an underactuated autonomous underwater vehicle (AUV) in a Gazebo twin of Kiwanis Lake, Tempe. The pair is a Clearpath Heron, \otterk{}, and an eight-inch AUV, \xudrone{}, whose four thrusters push only along the hull. The AUV can pitch and yaw, and it cannot roll or sway. The demonstration mission is one sentence: undock, fly through a hoop, and rendezvous with the boat. A phrase recognizer, backed by a language model for open wording, compiles that sentence into detach, hoop, and rendezvous. A behaviour node runs one step at a time and keeps the AUV armed between steps.
+We describe \CoRAL{}, a closed loop that turns a spoken joint mission into typed behaviours for a surface vehicle and an underactuated autonomous underwater vehicle (AUV) in a Gazebo twin of Kiwanis Lake, Tempe. The pair is \otterk{}, a digital twin of a catamaran autonomous surface vehicle (ASV) designed by the DREAMS Lab, and \xudrone{}, a digital twin of an AUV designed by the same lab, whose four thrusters push only along the hull. The AUV can pitch and yaw, and it cannot roll or sway. The demonstration mission is one sentence: undock, fly through a hoop, and rendezvous with the boat. A phrase recognizer, backed by a language model for open wording, compiles that sentence into detach, hoop, and rendezvous. A behaviour node runs one step at a time and keeps the AUV armed between steps.
 
 The same underactuation explains the control result. A time-indexed trajectory, inherited from a helical tracker, asks the hull to chase a moving point. At the drag-model cruise the brake spiked; at a slower pace the hull fell behind the reference and the heading command collapsed. Straight legs now use line-of-sight (LOS) guidance with no clock: the hull turns in place onto the line, a surge loop ramps and brakes, and pitch and heading close the depth and cross-track errors. In the twin, an 8\,m leg that began 173$^\circ$ off the line finished in 8.4\,s with thrust at most 0.24 of full scale and depth error at most 0.16\,m. The joint mission then passed the hoop 0.10\,m from the opening centre and latched under the boat. We report these as single demonstration runs.
 \end{abstract}
@@ -52,7 +52,7 @@ Marine robotics, autonomous underwater vehicles, autonomous surface vehicles, li
 
 A joint surface--underwater mission is easy to say and hard to fly. ``Undock, fly through the hoop, and rendezvous with the boat'' names three different problems: releasing a latched AUV, steering a body that cannot move sideways through a small opening, and docking that body under a moving hull. Each problem has its own sensing, its own acceptance test, and its own way of failing. A language model that emits a free-form trajectory does not own any of those tests. A controller that treats the AUV as a fully actuated point mass does not own the vehicle.
 
-This paper states that split and the system we built around it. \CoRAL{} is the aquatic half of a lab stack that already flies a multirotor and a ground rover from the same language interface. On the water the vehicles are \otterk{}, a Heron autonomous surface vehicle (ASV), and \xudrone{}, an eight-inch AUV docked under it. Both live in one Gazebo world of Kiwanis Lake. The operator's sentence becomes a short list of typed steps. Each step is a behaviour with a pass/fail event. The next step starts only when the current one ends, and the AUV stays armed across that handoff so the mission does not fall out of offboard control.
+This paper states that split and the system we built around it. \CoRAL{} is the aquatic half of a lab stack that already flies a multirotor and a ground rover from the same language interface. On the water the vehicles are \otterk{}, a digital twin of a catamaran autonomous surface vehicle (ASV) designed by the DREAMS Lab, and \xudrone{}, a digital twin of an AUV designed by the DREAMS Lab, docked under it. Both live in one Gazebo world of Kiwanis Lake. The operator's sentence becomes a short list of typed steps. Each step is a behaviour with a pass/fail event. The next step starts only when the current one ends, and the AUV stays armed across that handoff so the mission does not fall out of offboard control.
 
 The control contribution is narrower than the system. \xudrone{} is steered like a quadrotor lying on its side: the force the guidance wants is turned into a hull direction, and the thrust is the part of that force along the nose. That construction is a good fit for a curve whose acceleration is known, and a poor fit for a straight leg whose reference is a function of time. A carrot that moves on a clock pulls a lagging hull off the line, toward the carrot, and a carrot that brakes faster than the hull can stop pitches the nose. We replace the timed carrot on straight swims with LOS guidance \cite{fossen2011,lekkas2014}. Heading and pitch steer onto the line. Speed is a separate command. There is no time parameter for the lag to accumulate in.
 
@@ -63,7 +63,7 @@ The paper makes three claims, each limited to the digital twin.
 \item The hoop-and-dock chain is executable end to end: the AUV releases, crosses an authored opening, and latches under the boat on a centreline glide that does not orbit the nest.
 \end{enumerate}
 
-Section~\ref{sec:related} places the work. Section~\ref{sec:world} describes the lake and the two vehicles. Section~\ref{sec:coral} is the language and behaviour machine. Section~\ref{sec:control} is the hull law and the LOS swim. Section~\ref{sec:mission} is the hoop and the rendezvous. Section~\ref{sec:results} reports the runs. Section~\ref{sec:conclusion} states what is not yet shown.
+Section~\ref{sec:related} places the work. Section~\ref{sec:world} describes the aquatic world and the robot team. Section~\ref{sec:coral} is the language and behaviour machine. Section~\ref{sec:control} is the hull law and the LOS swim. Section~\ref{sec:mission} is the hoop and the rendezvous. Section~\ref{sec:results} reports the runs. Section~\ref{sec:conclusion} states what is not yet shown.
 
 \section{Related work}
 \label{sec:related}
@@ -74,19 +74,19 @@ Guidance for vehicles that cannot sway is classical LOS path following \cite{fos
 
 Language-conditioned robot stacks usually stop at a plan: a model emits waypoints or code, and a separate controller tracks them. That split is right when the controller's assumptions match the vehicle. It fails when the plan is a clocked curve and the vehicle can only push along its nose. \CoRAL{} keeps the split, but the plan is a list of behaviours that already contain the vehicle's constraints. Fixed phrases cover the missions we are willing to fly without review. A language model covers the rest, and its output is still the same typed steps.
 
-\section{Kiwanis world and the vehicle pair}
+\section{Aquatic world and robot team}
 \label{sec:world}
 
 \subsection{The lake}
-The Gazebo world replaces an oversized rectangular lake with a shoreline taken from Kiwanis Lake in Tempe, Arizona. The published lake is about 13 acres, with a maximum depth of about 8\,ft. The model origin is the shoreline polygon's centroid. The bed is a visual bowl, 1\,m at the shore and 10\,m at the deepest point. There is no bathymetric survey in the mesh, and the props (hoop, tag cube, rocks, buoys, pier) are not solid. Buoyancy is a density field below the plane $z=0$, not a free-surface mesh. Both vehicles spawn at the origin: the AUV a metre down, the boat on the surface. The twin is a sandbox. A separate Heron twin of Tempe Town Lake is left untouched.
+The Gazebo world replaces an oversized rectangular lake with a shoreline taken from Kiwanis Lake in Tempe, Arizona. The published lake is about 13 acres, with a maximum depth of about 8\,ft. The model origin is the shoreline polygon's centroid. The bed is a visual bowl, 1\,m at the shore and 10\,m at the deepest point. There is no bathymetric survey in the mesh, and the props (hoop, tag cube, rocks, buoys, pier) are not solid. Buoyancy is a density field below the plane $z=0$, not a free-surface mesh. Both vehicles spawn at the origin: the AUV a metre down, the boat on the surface. The twin is a sandbox. A separate twin of the same boat on Tempe Town Lake is left untouched.
 
 The world is large enough for the behaviours we care about and small enough that a missed depth command hits the bowl. A vertical loop is clamped above that floor. The hoop sits at the midpoint of a 9.25\,m water column. The bed tag cube sits on the bottom. These are authored landmarks, not detections of the real lake.
 
 \subsection{The surface vehicle}
-\otterk{} is a Clearpath Heron running PX4 in the same simulator as the AUV. It is the dock, the moving frame for rendezvous, and a vehicle with its own behaviours: a surface goto and a survey. It has no camera in this world. The AUV is the only eye. Three AprilTags face the AUV. Tag 10, 0.40\,m, is centred on the underside of the deck and is the nest marker for station-keeping and docking. Tags 11 and 12, 0.24\,m, sit on the pontoon sterns and face aft, so the AUV's front camera can see them on the approach. A latch weld accepts the AUV near the Heron origin, on the midline between the pontoons, within 0.6\,m and about 30$^\circ$ of attitude error.
+\otterk{} is a digital twin of a catamaran ASV designed by the DREAMS Lab. The boat is about the size of a Heron and runs PX4 in the same simulator as the AUV. Each pontoon is 1.20\,m long and 0.24\,m in diameter, and the pontoon centres are 0.76\,m apart, so the boat is 1.20\,m long and 1.00\,m across. The hull mass is 28\,kg. It is the dock, the moving frame for rendezvous, and a vehicle with its own behaviours: a surface goto and a survey. It has no camera in this world. The AUV is the only eye. Three AprilTags face the AUV. Tag 10, 0.40\,m, is centred on the underside of the deck and is the nest marker for station-keeping and docking. Tags 11 and 12, 0.24\,m, sit on the pontoon sterns and face aft, so the AUV's front camera can see them on the approach. A latch weld accepts the AUV near the boat origin, on the midline between the pontoons, within 0.6\,m and about 30$^\circ$ of attitude error.
 
 \subsection{The underwater vehicle}
-\xudrone{} is an eight-inch AUV with four thrusters arranged so that every rotor pushes along the hull axis. Each thruster is limited to 36\,N, so full forward thrust is 144\,N. Pitch and yaw are differential thrust on a 0.14\,m arm. Roll commands produce no motor output; ballast keeps the hull upright. The hull and its sensor and rotor links mass 13.666\,kg and displace 13.70\,kg, so the vehicle is about 0.3\,N light and rests awash rather than sinking. Body-frame drag is modelled as $1.2v + 3v^{2}$ newtons along the nose and a much larger quadratic term laterally and vertically. That drag is why a sideways force is the wrong thing to ask for: the hull will not crab, and the force has to be turned into a heading.
+\xudrone{} is a digital twin of an AUV designed by the DREAMS Lab. The pressure hull is a tube 0.30\,m long and 0.22\,m in diameter. Four thrusters sit in a square at the stern so that every rotor pushes along the hull axis. That stern arrangement is related to the HippoCampus micro-AUV \cite{hackbarth2015}, and this hull was designed independently. Each thruster is limited to 36\,N, so full forward thrust is 144\,N. Pitch and yaw are differential thrust on a 0.14\,m arm. Roll commands produce no motor output; ballast keeps the hull upright. The hull and its sensor and rotor links mass 13.666\,kg and displace 13.70\,kg, so the vehicle is about 0.3\,N light and rests awash rather than sinking. Body-frame drag is modelled as $1.2v + 3v^{2}$ newtons along the nose and a much larger quadratic term laterally and vertically. That drag is why a sideways force is the wrong thing to ask for: the hull will not crab, and the force has to be turned into a heading.
 
 Three cameras look along the mission. The front camera serves the hoop, the stern tags, and the operator's video. The nadir camera sees the bed tag once the hull is over it. The upward camera, on the crown and pitched down, sees deck tag 10 during the dock. A downward range and a barometer feed the estimator. The control pose is that estimate, with Gazebo as a check: a tick whose estimate is stale or far from the simulator flies the simulator pose and records the miss.
 
@@ -99,6 +99,35 @@ with $F_{\max}=144\,\mathrm{N}$. Pitch is limited on cruise behaviours, 45$^\cir
 
 \section{From a sentence to a behaviour}
 \label{sec:coral}
+
+Fig.~\ref{fig:stack} is the whole path. Three web frontends share one operator: the DeepGIS search page, its WebXR cockpit, and the robot panel already used for the lab's other vehicles. The panel takes a sentence and a callsign. A phrase the recognizer knows becomes typed steps with no language model. Open wording goes to the model, which may emit only those same steps. \CoRAL{} then runs one step. In the aquatic twin a ROS~2 behaviour publishes the offboard setpoint, PX4 flies it, and Gazebo is the Kiwanis world that holds both robots. Video and status return to the pages. No stage emits raw thrust.
+
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}
+  \node[sm, minimum width=30mm] (page) at (0,0) {DeepGIS page};
+  \node[sm, minimum width=32mm] (xr) at (5.0,0) {WebXR cockpit};
+  \node[sm, minimum width=30mm] (panel) at (10.2,0) {Robot panel};
+  \node[sm, minimum width=30mm] (phr) at (2.4,-1.95) {Fixed phrases};
+  \node[sm, minimum width=18mm] (llm) at (6.6,-1.95) {LLM};
+  \node[sm, minimum width=32mm] (plan) at (2.4,-3.85) {CoRAL plan};
+  \node[sm, minimum width=22mm] (ros) at (2.4,-5.75) {ROS 2};
+  \node[sm, minimum width=24mm] (px4) at (6.5,-5.75) {PX4};
+  \node[sm, minimum width=26mm] (gz) at (10.2,-5.75) {Gazebo};
+  \draw[arr] (panel.south) -- ++(0,-0.55) coordinate (sent)
+    -- node[sml, below] {sentence, callsign} (phr.north |- sent) -- (phr.north);
+  \draw[arr] (phr) -- node[sml, above] {open} (llm);
+  \draw[arr] (phr) -- node[sml, left] {known} (plan);
+  \draw[arr] (llm.south) |- node[sml, above, pos=0.72] {typed steps} (plan.east);
+  \draw[arr] (plan) -- node[sml, right] {one step} (ros);
+  \draw[arr] (ros) -- node[sml, above] {offboard} (px4);
+  \draw[arr] (px4) -- node[sml, above] {forces} (gz);
+  \draw[arr] (gz.east) -- ++(0.8,0) coordinate (side)
+    -- node[sml, right] {video, status} (side |- panel.east) -- (panel.east);
+\end{tikzpicture}
+\caption{The stack around the aquatic twin. The search page and the WebXR cockpit are the other web frontends; the sentence is entered on the robot panel. A known phrase skips the language model. The model, when it is called, returns typed steps rather than thrust. ROS~2, PX4, and Gazebo are one simulator: the behaviours, the offboard autopilots, and the Kiwanis world with \otterk{} and \xudrone{}.}
+\label{fig:stack}
+\end{figure*}
 
 \subsection{What the operator says}
 The operator interface is the same one used for the lab's other vehicles: a sentence, a callsign, and a status channel. For this pair the callsigns share one simulator. A sentence may name either vehicle. The aquatic behaviours that matter for the joint mission are:
@@ -351,6 +380,15 @@ The sentence ``undock, fly through the hoop, and rendezvous with \otterk{}'' pro
 
 An earlier build of the same day did not complete this chain. A helper added to the shared controller was named the same as a hoop method with a different signature, so every hoop raised a type error a few seconds in and the plan stopped before rendezvous. The helper was renamed, and a unit test now fails if a behaviour class defines a method that belongs to the base controller. We record this because the mission failure was not in the language layer. The plan was already detach, hoop, rendezvous. The state machine ran that plan. The vehicle code crashed inside the second step.
 
+Fig.~\ref{fig:tour} is the latest run of the same sentence. The boat stayed within 0.2\,m of $(-6.3, 0.08, -0.14)$\,m. The hoop log begins at the surface, 0.84\,m from that pose.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{tour_3d.pdf}
+\caption{Latest tour in the Kiwanis twin: the hoop log joined to the rendezvous that took the baton. (a)~Three-dimensional view at equal scale, from the south-east, so east runs down and to the right and a small north offset separates the two legs. (b)~The same track in the east--up plane. The AUV dived beside the boat, levelled at hoop depth, and crossed the 1\,m ring 0.06\,m from its centre. It finished the hoop 1.6\,m farther east. The return climbed along nearly the same vertical plane and latched 31\,s later, 0.28\,m from the logged boat pose and 0.26\,m below it. North offset stayed within 1.03\,m outbound and 0.88\,m on the return. Nose-down pitch reached $55^\circ$ on the dive and $67^\circ$ on the climb, for about 2\,s and under 1\,s, past the $45^\circ$ cruise limit. Peak thrust was 0.05 of full scale on the hoop and 0.06 on the rendezvous.}
+\label{fig:tour}
+\end{figure*}
+
 \subsection{Rendezvous geometry, separately}
 Before the centreline glide, six rendezvous runs on the older point-pursuit terminal included three that orbited 0.2--0.9\,m under the nest before latching. After the change, runs from off the centreline and from a straight approach latched on the first pass, and a deliberate 0.6\,m bias in the boat prior was pulled below 0.1\,m within about a second of the first stern-tag frames. With no injected bias, the vision offset against the simulator boat stayed on the order of a few centimetres to 0.15\,m and was held after the tags left the camera. These runs are the evidence for Section~\ref{sec:mission}'s claim that the hull should fly the line rather than a point under the nest. They are not a full dock-success rate.
 
@@ -396,6 +434,9 @@ N.~Koenig and A.~Howard, ``Design and use paradigms for {Gazebo}, an open-source
 
 \bibitem{macenski2022}
 S.~Macenski, T.~Foote, B.~Gerkey, C.~Lalancette, and W.~Woodall, ``Robot {Operating System 2}: Design, architecture, and uses in the wild,'' \emph{Sci.\ Robot.}, vol.~7, no.~66, p.~eabm6074, May 2022.
+
+\bibitem{hackbarth2015}
+A.~Hackbarth, E.~Kreuzer, and E.~Solowjow, ``{HippoCampus}: A micro underwater vehicle for swarm applications,'' in \emph{Proc.\ IEEE/RSJ Int.\ Conf.\ Intell.\ Robots Syst.\ (IROS)}, Hamburg, Germany, 2015, pp.~2258--2263.
 
 \end{thebibliography}
 

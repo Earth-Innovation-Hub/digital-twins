@@ -51,4 +51,4 @@ Production boat install/tests: [`otter/README.md`](otter/README.md).
 - On-robot ROS (executors, relays): [`DREAMS-lab/dreams_llm_ros2`](https://github.com/DREAMS-lab/dreams_llm_ros2)
 - Globe / AI pilot: [`Earth-Innovation-Hub/deepgis-xr`](https://github.com/Earth-Innovation-Hub/deepgis-xr)
 - CoRAL concept (field): [`Earth-Innovation-Hub/coral`](https://github.com/Earth-Innovation-Hub/coral)
-- ICRA-style draft of this twin's joint mission: [`papers/coral-icra/coral_kiwanis.pdf`](papers/coral-icra/coral_kiwanis.pdf)
+- ICRA-style draft of this twin's joint mission: [`papers/coral-preprint/coral_kiwanis.pdf`](papers/coral-preprint/coral_kiwanis.pdf)
