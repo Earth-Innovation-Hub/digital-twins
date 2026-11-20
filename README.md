@@ -54,4 +54,4 @@ Production boat install/tests: [`otter/README.md`](otter/README.md).
 - ICRA-style draft of this twin's joint mission: [`papers/coral-preprint/coral_kiwanis.pdf`](papers/coral-preprint/coral_kiwanis.pdf)
 - Demo reel, full file: [`papers/coral-preprint/demo_reel.mp4`](papers/coral-preprint/demo_reel.mp4)
 
-https://github.com/user-attachments/assets/44780b90-285e-4516-ad6e-52ed214aa278
+https://github.com/user-attachments/assets/46dff431-1314-43bf-a0ac-9f17cd3ea11b
