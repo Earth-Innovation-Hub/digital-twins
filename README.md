@@ -52,4 +52,6 @@ Production boat install/tests: [`otter/README.md`](otter/README.md).
 - Globe / AI pilot: [`Earth-Innovation-Hub/deepgis-xr`](https://github.com/Earth-Innovation-Hub/deepgis-xr)
 - CoRAL concept (field): [`Earth-Innovation-Hub/coral`](https://github.com/Earth-Innovation-Hub/coral)
 - ICRA-style draft of this twin's joint mission: [`papers/coral-preprint/coral_kiwanis.pdf`](papers/coral-preprint/coral_kiwanis.pdf)
-- Demo reel of that mission: [`papers/coral-preprint/demo_reel.mp4`](papers/coral-preprint/demo_reel.mp4)
+- Demo reel, full file: [`papers/coral-preprint/demo_reel.mp4`](papers/coral-preprint/demo_reel.mp4)
+
+https://github.com/user-attachments/assets/44780b90-285e-4516-ad6e-52ed214aa278
