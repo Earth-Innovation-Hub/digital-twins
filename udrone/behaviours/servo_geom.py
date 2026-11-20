@@ -11,7 +11,7 @@ The camera comes from where the feature sits relative to the hull. The
 upward camera looks along hull +Z, the downward camera along hull -Z, and
 the front camera along hull +X. Image +x is hull -Y on all three. On the
 upward camera image +y is hull -X. On the downward camera image +y is
-hull +X.
+hull -X.
 """
 from __future__ import annotations
 
@@ -157,7 +157,8 @@ def choose_eye(front_fresh: bool, down_fresh: bool, vehicle, feature) -> str | N
 def nadir_body(x_n, y_n, z_opt):
     """Tag offset in the hull frame from the downward camera.
 
-    Image +x is hull -Y and image +y is hull +X. The range is along hull -Z.
+    Image +x is hull -Y and image +y is hull -X. The range is along hull -Z.
+    A tag in the upper half of the image is ahead of the hull.
     """
     z = float(z_opt)
-    return (float(y_n) * z, -float(x_n) * z, -z)
+    return (-float(y_n) * z, -float(x_n) * z, -z)

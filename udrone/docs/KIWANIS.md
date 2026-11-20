@@ -15,12 +15,12 @@ on Tempe Town Lake is a different world and container.
   (shore 1 m, deepest point 10 m, steepest at the bank) with a tiled coral-reef
   albedo (`materials/textures/bed_sand.png`, ~8 m/tile; cream, purple, pink,
   teal, and green heads on sand, kept off the hoop orange gate); park mesh with lake hole; west
-  pier stub; AprilTag 36h11 id 0 (0.40 m) on all six faces of a 0.50 m
-  cube at ENU (5 E, 4 N, centre z=−9.22, sitting on the 9.49 m bed); a 1 m
+  pier stub; AprilTag 36h11 id 0 (0.40 m), one plate flat on the bed at
+  ENU (5 E, 4 N, z=−9.44), facing up, just above the bed; a 1 m
   hoop at ENU (6 E, 0 N, z=−4.63), the midpoint of the water column there;
   AprilTag 36h11 id 10 (0.40 m) centered on the underside of the Heron deck,
-  facing down (nest search / track / rendezvous); ids 11 and 12 (0.24 m) on
-  the port and starboard pontoon sterns, facing aft; static bottom debris and
+  facing down (nest search / track / rendezvous); ids 11 and 12 (0.14 m on
+  0.16 m plates) inside the 0.24 m pontoon stern faces, facing aft; static bottom debris and
   surface floats clear of the `0,0` spawn. Regenerate textures/UVs with
   `python3 mk_bed_texture.py` in this model folder.
 - Sensors / perception: otter_k nadir (`/otter_k/camera_down/*`); xudrone front

@@ -24,12 +24,11 @@ Solo AUV mode is also supported: only instance 0, model `xudrone_0`, same airfra
 ## Gazebo world (screenshots)
 
 Kiwanis Lake bed + shoreline in Gazebo Sim; entities `heron_0` (yellow ASV) and
-`xudrone_1` (AUV). A white **0.50 m cube** at ~ENU (5 E, 4 N, centre z≈−1.83)
-carries **AprilTag 36h11 id 0** (0.40 m) on **all six faces** so front, nadir, and
-side views can lock for survey stop and `approach_tag`. **AprilTag 36h11 id 10**
+`xudrone_1` (AUV). A single flat **AprilTag 36h11 id 0** (0.40 m) lies on a white plate just above the bed at ENU (5 E, 4 N), facing up, for `approach_tag`. **AprilTag 36h11 id 10**
 (0.40 m) is centered on the underside of the Heron deck, facing down, for the
-upward camera. **Ids 11 and 12** (0.24 m) are on the stern ends of the port
-and starboard pontoons, facing aft, for the front camera on the glide path.
+upward camera. **Ids 11 and 12** (0.14 m, on 0.16 m plates) sit inside the
+0.24 m stern face of the port and starboard pontoons, facing aft, for the
+front camera on the glide path.
 The boat's tags are self-lit; they face away from the sun. A **1 m vertical orange
 ring** (tube radius 0.045 m, 12 segments) sits at ENU (6, 0, −4.626), the
 midpoint of the water column, opening along east-west. It has no AprilTags;
@@ -183,7 +182,7 @@ Commands:
 | `rendezvous` | xudrone | Nest-axis dock under otter_k. Aft corridor → up-cam deck tag 10 servo on boat −Z → acceptance cone dock (MPC). Cone: 42° / 3.5 m, heading ≤40°, tilt ≤48°; ATTACH inside 0.55 m / 28° (LinkAttacher still 0.6 m / 30°). Optional `power_pct` (5–100). Phrase `xudrone, rendezvous and dock with otter_k` or `… with 50% power` |
 | `shape` | xudrone | Infinity / orbit / vertical loop on the force loop (detach first). Phrase e.g. `xudrone, fly an infinity pattern of 3m loops` |
 | `coverage` | xudrone | 3D boustrophedon (same controller, new `pos_des`); optional `until: tag_detected`; `--plan map` uses the costmap |
-| `approach_tag` | xudrone | Expanding spiral search → front-cam IBVS rates + thrust (`VehicleRatesSetpoint` / `UUV_SKIP_CTRL`); EchoRanger/surface clearance; settle → `approach_done` |
+| `approach_tag` | xudrone | Level spiral while the down camera searches. Image-down on that camera is hull-aft. The first sighting fixes the tag point; the front camera aims at that point from the current pose, then locks the tag at the image centre and surges along that line. At 2 m the hull brakes in reverse and levels, then the approach succeeds. EchoRanger/surface clearance remains the last gate. → `approach_done` |
 | `dock` | latch | boat-nest ATTACH/DETACH (gates 0.6 m / 30°) — not bed-tag geometry |
 
 Default `tag_size_m` is **0.4** (matches the cube faces / `apriltag.yaml`).
@@ -195,7 +194,9 @@ Perception: otter_k nadir → `/otter_k/detections`; xudrone **front** →
 underside deck tag only. `rendezvous` also logs which of tags 10, 11 and 12
 each camera decodes (`VIS` lines in `/tmp/coral_rendezvous.log`). The front
 camera holds the stern tags from about 7.6 m to 2.5 m; inside about 1.4 m no
-camera has a tag. `apriltag.yaml` sizes ids 11 and 12 at 0.24 m.
+camera has a tag. Each pontoon is 0.24 m across. Ids 11 and 12 are 0.14 m
+tags on 0.16 m white plates, so the plate stays inside that circle.
+`apriltag.yaml` sizes those two ids at 0.14 m.
 
 `track` is the Kiwanis form of Harish Anand's thesis,
 [Coordinated Navigation and Localization of an Autonomous Underwater Vehicle Using an Autonomous Surface Vehicle in the OpenUAV Simulation Framework](https://keep.lib.asu.edu/_flysystem/fedora/c7/233928/Anand_asu_0010N_20290.pdf)

@@ -1387,7 +1387,7 @@ class UdroneHoopController(UdroneHelixController):
                 self._deep_t = None
             elif self._deep_t is None:
                 self._deep_t = tm
-            elif tm - self._deep_t > 4.0:
+            elif tm - self._deep_t > 15.0:
                 self._fail("depth ran away from the hoop")
                 return self._act(tm, auv, boat, self._sight_hit, (0.0, 0.0, 0.0, 0.0))
         else:

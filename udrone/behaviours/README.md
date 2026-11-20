@@ -14,7 +14,7 @@ Runs inside `digital-twin-aquatic` on `/coral/{command,event,status,detections,t
 | `run_rendezvous.py` | `rendezvous` | Glide from 6 m aft on the boat centreline → fly through the weld sphere 0.25 m under the nest → ATTACH when the weld gate holds; go-around on a miss. The front camera's fixes on tags 10/11/12 correct the boat pose it flies on (`boat_fix.py`, `rendezvous_geom.py`) |
 | `run_shape.py` | `shape` | Infinity / orbit / vertical loop (`shape_geom.py`) |
 | `run_coverage.py` | `coverage` | AUV 3D lawnmower (`patterns.volume_lawnmower`) |
-| `run_approach_tag.py` | `approach_tag` | Expanding spiral search → front-cam IBVS rates |
+| `run_approach_tag.py` | `approach_tag` | Level spiral while the down camera searches. Image-down on that camera is hull-aft. The first sighting fixes the tag point; the front camera aims at that point from the current hull pose, then locks the tag and flies the LOS approach |
 | `run_hold.py` | (between steps) | Holds the armed AUV where the last step ended until the next step takes it over (baton in `/tmp`) |
 | `run_tags.sh` | (launch) | apriltag_ros + `tag_detector` for otter_k / xudrone |
 | `xudrone_mapper.py` + `map_geom.py` | (launch, `xudrone_mapping.sh`) | TF, odom, 2D grid, costmap, OctoMap cloud, map image, coverage plans |
@@ -47,7 +47,8 @@ Every runner on `UdroneHelixController` publishes one HUD image,
 `/xudrone/hud/image` (latest frame also at `/tmp/xudrone_hud.jpg`, once a
 second; `UDRONE_HUD=0` turns it off). `hud_overlay.py` draws the task's camera
 (front for swim, shape, coverage, helix, hold, and hoop; up for track and
-rendezvous; front or down as `approach_tag` switches eyes). On that camera it
+rendezvous; down during the `approach_tag` search, then front once the tag
+is fixed). On that camera it
 adds the AprilTag boxes and the projected reference, targets, and boat. The front
 camera also gets the horizon, the commanded hull direction, and the command arrow.
 Around the edges sit a telemetry panel, the other two cameras, and a north-up
@@ -61,11 +62,19 @@ holds the upward camera about 1 m under AprilTag 10 on the
 Heron deck. The method is Harish Anand's ASU thesis
 ([PDF](https://keep.lib.asu.edu/_flysystem/fedora/c7/233928/Anand_asu_0010N_20290.pdf));
 Kiwanis uses a 1 m standoff because the lake is about 2.4 m deep.
-`approach_tag` subclasses the same offboard path: **search** = attitude-rate
-expanding spiral around an ENU seed / last lock until `/xudrone/detections`
-locks, then IBVS pitch/yaw/surge into `VehicleRatesSetpoint`; lost track
-returns to search (radius grows). Clearance uses `/xudrone/range/{bottom,surface}`
-(EchoRanger + upward beam) plus pose depth to keep off the bed / free surface.
+`approach_tag` subclasses the same offboard path. It flies a level spiral
+while the down camera searches for the bed tag. Image-down on that camera
+is hull-aft, so a tag high in the image is ahead of the hull. The first
+sighting stores the tag point and hands the lock to the front camera,
+which aims from the current hull position at that point until the tag
+appears in the front image. After that, yaw and pitch hold the tag at
+the centre of the front image and a steady surge closes along that line.
+At 2 m the hull brakes in reverse and levels, then the approach succeeds.
+A dark front frame keeps aiming at the stored point. Clearance
+uses `/xudrone/range/{bottom,surface}` (EchoRanger + upward beam) plus pose
+depth to keep off the bed and the free surface.
+A boat `goto` or `survey` and an AUV behaviour can run at the same time.
+Each lane keeps its own command id, so one finishing does not clear the other.
 Downward EchoRanger also feeds PX4 `distance_sensor` via GZBridge
 (`EKF2_RNG_CTRL=1`; baro remains `EKF2_HGT_REF`). See the pack
 [README](../README.md#behaviour-library-coral) for schema and CLI.

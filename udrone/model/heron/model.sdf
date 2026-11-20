@@ -103,16 +103,19 @@
           </pbr>
         </material>
       </visual>
-      <!-- AprilTags 36h11 id 11 (port) and id 12 (starboard), 0.24 m, on white
-           0.32 m plates on the stern end of each pontoon (x = -0.60), facing
-           aft. An AUV on the aft glide path sees them nearly head-on in its
-           front camera: the midpoint of the pair is the centreline and their
-           0.76 m spacing gives range. The mesh is the 0.40 m plane scaled by
-           0.6; +Z of the mesh points aft and +Y points up. Visual only. -->
+      <!-- AprilTags 36h11 id 11 (port) and id 12 (starboard), 0.14 m, on white
+           0.16 m plates on the stern end of each pontoon (x = -0.60), facing
+           aft. The tube is 0.24 m across. A square inside that circle is at
+           most 0.17 m on a side, so the plate stays inside the end face and
+           the tag sits inside the plate. An AUV on the aft glide path sees
+           them nearly head-on in its front camera: the midpoint of the pair
+           is the centreline and their 0.76 m spacing gives range. The mesh
+           is the 0.40 m plane scaled by 0.35; +Z of the mesh points aft and
+           +Y points up. Visual only. -->
       <visual name="stern_tag_plate_port">
         <pose>-0.602 0.38 0.14 0 0 0</pose>
         <cast_shadows>false</cast_shadows>
-        <geometry><box><size>0.004 0.32 0.32</size></box></geometry>
+        <geometry><box><size>0.004 0.16 0.16</size></box></geometry>
         <material>
           <ambient>0.95 0.95 0.95 1</ambient>
           <diffuse>0.98 0.98 0.98 1</diffuse>
@@ -122,7 +125,7 @@
       <visual name="apriltag_11">
         <pose>-0.606 0.38 0.14 1.5707963 0 -1.5707963</pose>
         <cast_shadows>false</cast_shadows>
-        <geometry><mesh><uri>model://heron/meshes/tag_plane.obj</uri><scale>0.6 0.6 1</scale></mesh></geometry>
+        <geometry><mesh><uri>model://heron/meshes/tag_plane.obj</uri><scale>0.35 0.35 1</scale></mesh></geometry>
         <material>
           <ambient>1 1 1 1</ambient>
           <diffuse>1 1 1 1</diffuse>
@@ -140,7 +143,7 @@
       <visual name="stern_tag_plate_starboard">
         <pose>-0.602 -0.38 0.14 0 0 0</pose>
         <cast_shadows>false</cast_shadows>
-        <geometry><box><size>0.004 0.32 0.32</size></box></geometry>
+        <geometry><box><size>0.004 0.16 0.16</size></box></geometry>
         <material>
           <ambient>0.95 0.95 0.95 1</ambient>
           <diffuse>0.98 0.98 0.98 1</diffuse>
@@ -150,7 +153,7 @@
       <visual name="apriltag_12">
         <pose>-0.606 -0.38 0.14 1.5707963 0 -1.5707963</pose>
         <cast_shadows>false</cast_shadows>
-        <geometry><mesh><uri>model://heron/meshes/tag_plane.obj</uri><scale>0.6 0.6 1</scale></mesh></geometry>
+        <geometry><mesh><uri>model://heron/meshes/tag_plane.obj</uri><scale>0.35 0.35 1</scale></mesh></geometry>
         <material>
           <ambient>1 1 1 1</ambient>
           <diffuse>1 1 1 1</diffuse>

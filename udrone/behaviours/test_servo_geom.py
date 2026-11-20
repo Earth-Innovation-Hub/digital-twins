@@ -103,6 +103,11 @@ def main():
     _close(body[2], -2.0)
     right = nadir_body(0.25, 0.0, 2.0)
     _close(right[1], -0.5)
+    # Image up is ahead of the hull. Image down is aft.
+    ahead = nadir_body(0.0, -0.25, 2.0)
+    _close(ahead[0], 0.5)
+    aft = nadir_body(0.0, 0.25, 2.0)
+    _close(aft[0], -0.5)
 
     shipped = score(RELOCK_STEP_M)
     assert shipped > score(0.15)

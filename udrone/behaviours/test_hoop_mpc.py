@@ -177,6 +177,10 @@ def main():
     z_ref, vz = search_dive_reference(center[2] + 0.05, center[2])
     assert center[2] <= z_ref < center[2] + 0.05
     assert -0.04 < vz < 0.0
+    # A hull below the ring climbs on the same short carrot.
+    z_ref, vz = search_dive_reference(center[2] - 3.0, center[2])
+    assert center[2] - 3.0 < z_ref < center[2] - 2.8
+    assert abs(vz - 0.24) < 1e-9, vz
     # Search depth closes on a forward glide, with no full-depth point.
     gp, gv = search_glide_reference((0.0, 0.0, -0.13), (3.0, 0.0, center[2]), center[2])
     assert 0.05 < gp[0] < 0.20 and gp[1] == 0.0

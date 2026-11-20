@@ -187,7 +187,14 @@ def search_dive_reference(z_now, target_z, max_speed: float = 0.24, lead_m: floa
     """
     z = float(z_now)
     target = float(target_z)
-    err = max(0.0, z - target)
+    # Positive error is above the ring (dive). Negative is below it (climb),
+    # which is how a bed-tag approach hands the hull to the hoop.
+    if z < target:
+        err = target - z
+        vz = min(float(max_speed), 0.7 * err)
+        z_ref = min(target, z + min(float(lead_m), abs(vz) * 0.6))
+        return z_ref, vz
+    err = z - target
     vz = -min(float(max_speed), 0.7 * err)
     z_ref = max(target, z - min(float(lead_m), abs(vz) * 0.6))
     return z_ref, vz
@@ -211,7 +218,7 @@ def search_glide_reference(
         ux, uy = dx / dist, dy / dist
     else:
         ux = uy = 0.0
-    depth_err = max(0.0, z - float(target_z))
+    depth_err = abs(z - float(target_z))
     progress = 1.0 - min(1.0, depth_err / max(0.1, float(ramp_depth_m)))
     vh = float(min_vh) + (float(max_vh) - float(min_vh)) * progress
     vh = min(vh, dist / 0.6) if dist > 0.0 else 0.0

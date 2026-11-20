@@ -446,14 +446,16 @@ def pass_depth(z: float) -> float:
 
 
 def leg_clock(z_now, search_z, band, held, t0, tm, shallow_t):
-    """Dive-then-translate clock for one search leg.
+    """Dive or climb, then translate, for one search leg.
 
     Returns ``(hold, held, t0, shallow_t)``. ``hold`` means stay on the depth
-    point. The clock starts the first time the hull is within ``band`` of
-    ``search_z``. A later shallow bob pauses that clock. It does not restart.
+    point: too shallow, or deeper than the ring (a bed-tag handoff). The clock
+    starts the first time the hull is within ``band`` of ``search_z``. A later
+    excursion pauses that clock. It does not restart.
     """
     shallow = float(z_now) > float(search_z) + float(band)
-    if shallow:
+    deep = float(z_now) < float(search_z) - float(band)
+    if shallow or deep:
         if held and shallow_t is None and t0 is not None:
             shallow_t = float(tm)
         return True, bool(held), t0, shallow_t

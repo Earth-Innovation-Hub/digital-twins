@@ -127,6 +127,17 @@ def _new_id() -> str:
     return uuid.uuid4().hex[:10]
 
 
+_BOAT_KINDS = {"goto", "survey"}
+_AUV_KINDS = {
+    "dock", "helix", "shape", "swim", "hoop", "track", "search_otter",
+    "rendezvous", "coverage", "approach_tag", "approach",
+}
+_AUV_PHASES = {
+    "dock", "helix", "shape", "swim", "hoop", "track", "search_otter",
+    "rendezvous", "coverage", "approach",
+}
+
+
 class CoralBehaviours(Node):
     def __init__(self):
         super().__init__("coral_behaviours")
@@ -194,6 +205,9 @@ class CoralBehaviours(Node):
         self._helix_proc = None
         self._helix_meta = None
         self._auv_kind = None        # "helix" | "coverage" | "approach"
+        self._boat_id = None
+        self._auv_id = None
+        self._auv_phase = None
 
         self.create_timer(0.1, self._tick)
         self.create_timer(1.0, self._publish_status)
@@ -255,6 +269,15 @@ class CoralBehaviours(Node):
             "auv": auv_s,
             "auv_model": self.auv_model,
             "auv_holding": baton_owner(self.auv_model) is not None,
+            "lanes": {
+                "otter_k": (
+                    ("survey" if self._survey is not None else "goto")
+                    if self._goto is not None else None
+                ),
+                "xudrone": self._auv_phase if (
+                    self._helix_proc is not None or self.phase == "dock"
+                ) else None,
+            },
             "sim_t": sim_t if fresh else None,
             "last_event": (self.last_event or {}).get("type"),
             "last_detection": self.last_detection,
@@ -341,9 +364,23 @@ class CoralBehaviours(Node):
             self._start_reset(cmd)
             return
         if self.busy and kind != "hold":
-            self._emit({"type": "rejected", "id": cid, "reason": f"busy ({self.phase})",
-                        "command": kind})
-            return
+            boat_live = self._goto is not None or self.phase in ("goto", "survey")
+            auv_live = (
+                (self._helix_proc is not None and self._helix_proc.poll() is None)
+                or self.phase == "dock"
+            )
+            if kind in _BOAT_KINDS and boat_live:
+                self._emit({"type": "rejected", "id": cid, "reason": f"busy ({self.phase})",
+                            "command": kind})
+                return
+            if kind in _AUV_KINDS and auv_live:
+                self._emit({"type": "rejected", "id": cid, "reason": f"busy ({self.phase})",
+                            "command": kind})
+                return
+            if kind not in _BOAT_KINDS and kind not in _AUV_KINDS:
+                self._emit({"type": "rejected", "id": cid, "reason": f"busy ({self.phase})",
+                            "command": kind})
+                return
 
         if kind == "dock":
             self._start_dock(cmd)
@@ -487,6 +524,30 @@ class CoralBehaviours(Node):
         self._emit({"type": "accepted", "id": cid, "command": "hold", "note": "nothing to hold"})
 
     def _clear_job(self):
+        """Clear the lane that just finished. Keep the other vehicle running."""
+        auv_live = self._helix_proc is not None or self.phase == "dock" or self._dock
+        boat_live = self._goto is not None
+        if self.phase in ("goto", "survey") and (
+            self._helix_proc is not None or self._auv_phase
+        ):
+            self._goto = None
+            self._survey = None
+            self._boat_id = None
+            self.phase = self._auv_phase or "idle"
+            self.active_id = self._auv_id
+            self.busy = self.phase != "idle"
+            return
+        if self.phase in _AUV_PHASES and boat_live:
+            self._helix_proc = None
+            self._helix_meta = None
+            self._auv_kind = None
+            self._auv_id = None
+            self._auv_phase = None
+            self._dock = None
+            self.phase = "survey" if self._survey is not None else "goto"
+            self.active_id = self._boat_id
+            self.busy = True
+            return
         self.phase = "idle"
         self.busy = False
         self.active_id = None
@@ -496,6 +557,9 @@ class CoralBehaviours(Node):
         self._helix_proc = None
         self._helix_meta = None
         self._auv_kind = None
+        self._auv_id = None
+        self._auv_phase = None
+        self._boat_id = None
 
     # ---- dock -----------------------------------------------------------
     def _start_dock(self, cmd):
@@ -509,6 +573,8 @@ class CoralBehaviours(Node):
         self.busy = True
         self.phase = "dock"
         self.active_id = cmd["id"]
+        self._auv_id = cmd["id"]
+        self._auv_phase = "dock"
         self._dock = {"want": want, "action": action, "deadline": time.time() + 8.0,
                       "sent": False}
         self._emit({"type": "accepted", "id": cmd["id"], "command": "dock", "action": action})
@@ -562,6 +628,7 @@ class CoralBehaviours(Node):
         self.busy = True
         self.phase = "goto"
         self.active_id = cmd["id"]
+        self._boat_id = cmd["id"]
         self._goto = {
             "east": east, "north": north, "rel": rel,
             "arrive_m": arrive, "timeout_s": timeout,
@@ -738,6 +805,7 @@ class CoralBehaviours(Node):
         self.busy = True
         self.phase = "survey"
         self.active_id = cmd["id"]
+        self._boat_id = cmd["id"]
         self._survey = {
             "wps": wps, "i": 0, "until": until or None,
             "arrive_m": arrive, "timeout_s": timeout,
@@ -1198,7 +1266,7 @@ class CoralBehaviours(Node):
             os.environ.get("UDRONE_APPROACH_SEARCH_BUDGET", str(max(acquire, 45.0))),
         ))
         search_r0 = float(cmd.get(
-            "search_r0_m", os.environ.get("UDRONE_APPROACH_SEARCH_R0", "1.0")))
+            "search_r0_m", os.environ.get("UDRONE_APPROACH_SEARCH_R0", "0.0")))
         search_r_max = float(cmd.get(
             "search_r_max_m", os.environ.get("UDRONE_APPROACH_SEARCH_RMAX", "8.0")))
         tag_size = float(cmd.get("tag_size_m", os.environ.get("UDRONE_APPROACH_TAG_SIZE", "0.4")))
@@ -1305,6 +1373,8 @@ class CoralBehaviours(Node):
         self.phase = kind
         self.active_id = cid
         self._auv_kind = kind
+        self._auv_id = cid
+        self._auv_phase = kind
         self._helix_meta = meta
         # Truncate so each swim has a clean log (avoid orphan append noise).
         log = open(log_path, "wb", buffering=0)
@@ -1376,15 +1446,28 @@ class CoralBehaviours(Node):
 
     # ---- main tick ------------------------------------------------------
     def _tick(self):
+        boat = self._goto is not None
+        auv = self._helix_proc is not None
         if self.phase == "dock":
             self._tick_dock()
-        elif self.phase in ("goto", "survey"):
+        if boat and self.phase in ("goto", "survey"):
             self._tick_goto()
-        elif self.phase in (
-            "helix", "swim", "hoop", "track", "search_otter",
-            "rendezvous", "coverage", "approach", "shape",
-        ):
+        elif boat and self._boat_id:
+            prev = (self.active_id, self.phase)
+            self.active_id = self._boat_id
+            self.phase = "survey" if self._survey is not None else "goto"
+            self._tick_goto()
+            if self._goto is not None:
+                self.active_id, self.phase = prev
+        if auv and self.phase in _AUV_PHASES:
             self._tick_auv()
+        elif auv and self._auv_id:
+            prev = (self.active_id, self.phase)
+            self.active_id = self._auv_id
+            self.phase = self._auv_phase or self._auv_kind or "helix"
+            self._tick_auv()
+            if self._helix_proc is not None:
+                self.active_id, self.phase = prev
 
     def destroy_node(self):
         if self._helix_proc is not None and self._helix_proc.poll() is None:

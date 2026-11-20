@@ -163,6 +163,9 @@ def main():
     assert hold and shallow_t == 15.0
     hold, held, t0, shallow_t = leg_clock(z_ring, z_ring, 0.40, True, 12.0, 18.0, 15.0)
     assert not hold and held and abs(t0 - 15.0) < 1e-9 and shallow_t is None
+    # Below the ring, hold the clock and climb before the leg walks.
+    hold, held, t0, shallow_t = leg_clock(z_ring - 3.0, z_ring, 0.40, False, None, 20.0, None)
+    assert hold and not held
     print("hoop corridor ok")
 
 

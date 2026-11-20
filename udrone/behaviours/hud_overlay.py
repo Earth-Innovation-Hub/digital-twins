@@ -24,8 +24,8 @@ import os
 import time
 
 # Mounts from model/xudrone/model.sdf. Image +x is hull -Y on all three. Image
-# +y is hull -Z on the front camera, hull -X on the up camera, hull +X on the
-# down camera.
+# +y is hull -Z on the front camera, hull -X on the up camera, and hull -X
+# on the down camera.
 CAMERAS = {
     "front": {
         "image": "/xudrone/camera_front/image",
@@ -137,7 +137,7 @@ def project(camera: str, pos, q, world, intr):
     elif camera == "up":
         depth, x, y = u, -lft, -f
     else:
-        depth, x, y = -u, -lft, f
+        depth, x, y = -u, -lft, -f
     if depth < MIN_DEPTH_M:
         return None
     fx, fy, cx, cy = intr
