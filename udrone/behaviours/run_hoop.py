@@ -43,6 +43,7 @@ from hoop_geom import (
     CoverageMap,
     approach_point,
     authored_ring_lock,
+    blind_hold,
     corridor_lead_point,
     debug_caption,
     fly_trajectory,
@@ -1482,27 +1483,21 @@ class UdroneHoopController(UdroneHelixController):
             self._last_hit_t = tm
             self._align(tm, pos, hit)
             return self._act(tm, auv, boat, hit)
-        if near_known and self._tracking:
-            # Blind hold on the last centerline gate (ring left the frame).
-            # Keep the dict complete — _track logging used to KeyError on aspect
-            # and abort the whole behaviour mid-approach.
-            self._track(tm, pos, {
-                "fwd": self._axis or (1.0, 0.0, 0.0),
-                "z_opt": max(1.2, math.hypot(known[0] - pos[0], known[1] - pos[1])),
-                "center": known,
-                "aspect": 1.0,
-                "closed": True,
-                "x_l": 0.0,
-                "y_l": 0.0,
-                "x_n": 0.0,
-                "y_n": 0.0,
-            })
-            return self._act(tm, auv, boat, hit)
-
-        hold = 6.0 if self._approach_wps else LOST_S
-        if self._tracking and tm - self._last_hit_t <= hold:
-            return self._act(tm, auv, boat, hit)
+        # Ring left the frame. Keep flying the last plan for a few seconds,
+        # then search again. Do not invent a sighting.
+        age = tm - self._last_hit_t
+        if blind_hold(self._tracking, age, bool(self._approach_wps), LOST_S, 6.0) == "fly":
+            if self._sweep_world and time.time() >= self._track_log_t:
+                self._track_log_t = time.time() + 2.0
+                ap = self._sweep_world[-1]
+                print(
+                    f"HOOP_HOLD to=({ap[0]:.1f},{ap[1]:.1f},{ap[2]:.2f}) "
+                    f"blind={age:.1f}s",
+                    flush=True,
+                )
+            return self._act(tm, auv, boat, None)
         if self._tracking:
+            print("HOOP_HOLD lost, searching", flush=True)
             self._drop_track()
         self._steer(tm, pos, rpy_from_q(q)[2])
         if self.failed or self.done:

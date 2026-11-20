@@ -12,6 +12,7 @@ from hoop_geom import (
     approach_station,
     authored_ring_lock,
     leg_clock,
+    blind_hold,
     exit_station,
     gate_station,
     hoop_corridor,
@@ -166,6 +167,13 @@ def main():
     # Below the ring, hold the clock and climb before the leg walks.
     hold, held, t0, shallow_t = leg_clock(z_ring - 3.0, z_ring, 0.40, False, None, 20.0, None)
     assert hold and not held
+    # A lost ring keeps the last plan for a few seconds, then search resumes.
+    # It does not invent a sighting.
+    assert blind_hold(True, 2.0, True) == "fly"
+    assert blind_hold(True, 6.0, True) == "fly"
+    assert blind_hold(True, 6.1, True) == "search"
+    assert blind_hold(True, 2.0, False) == "search"
+    assert blind_hold(False, 0.0, True) == "search"
     print("hoop corridor ok")
 
 

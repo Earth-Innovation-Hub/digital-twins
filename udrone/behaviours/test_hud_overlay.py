@@ -9,6 +9,9 @@ from hud_overlay import (
     TaskHud,
     attitude_horizon_shift,
     default_intrinsics,
+    dial_tip,
+    compass_heading_deg,
+    heading_east_north,
     map_pixel,
     map_scale,
     project,
@@ -84,9 +87,33 @@ def main():
     assert attitude_horizon_shift(0.0) == 0.0
     assert abs(attitude_horizon_shift(math.radians(ATT_PITCH_FULL_DEG)) - float(ATT_RADIUS)) < 1e-9
     assert attitude_horizon_shift(math.radians(-10.0)) < 0.0
+    test_compass()
     test_map_raster()
     test_map_status_lines()
+    test_dials()
     print("hud overlay ok")
+
+
+def test_compass():
+    # ENU yaw 0 points east: heading 090, needle to the right on a north-up map.
+    east, north = heading_east_north(LEVEL)
+    assert east > 0.99 and abs(north) < 1e-9, (east, north)
+    assert abs(compass_heading_deg(LEVEL) - 90.0) < 1e-6
+    # Yaw +90° points north: heading 000, needle up.
+    east, north = heading_east_north(yaw_q(math.pi / 2.0))
+    assert abs(east) < 1e-6 and north > 0.99, (east, north)
+    assert compass_heading_deg(yaw_q(math.pi / 2.0)) < 1e-6
+
+
+def test_dials():
+    empty = dial_tip(0.0, 10.0)
+    assert empty[0] < -0.8 and empty[1] > 0.4, empty
+    full = dial_tip(10.0, 10.0)
+    assert full[0] > 0.8 and full[1] > 0.4, full
+    mid = dial_tip(5.0, 10.0)
+    assert abs(mid[0]) < 0.05 and mid[1] < -0.9, mid
+    assert dial_tip(None, 10.0) == dial_tip(0.0, 10.0)
+    assert dial_tip(99.0, 10.0) == dial_tip(10.0, 10.0)
 
 
 def test_map_status_lines():

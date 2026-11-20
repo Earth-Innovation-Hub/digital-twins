@@ -445,6 +445,19 @@ def pass_depth(z: float) -> float:
     return min(PASS_TOP, max(HOOP_FLOOR + 0.5, float(z)))
 
 
+def blind_hold(tracking: bool, age_s: float, has_plan: bool,
+               lost_s: float = 1.5, plan_hold_s: float = 6.0) -> str:
+    """Camera has no ring. ``fly`` keeps the last plan; ``search`` drops it.
+
+    A plan survives a short blink. A made-up ring is not a sighting: that
+    froze the aim point and the hull slid off it.
+    """
+    if not tracking:
+        return "search"
+    limit = plan_hold_s if has_plan else lost_s
+    return "fly" if float(age_s) <= float(limit) else "search"
+
+
 def leg_clock(z_now, search_z, band, held, t0, tm, shallow_t):
     """Dive or climb, then translate, for one search leg.
 

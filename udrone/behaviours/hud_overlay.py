@@ -10,7 +10,8 @@ Layers, back to front:
   world      the reference path ahead, targets, the boat, and the task's own
              geometry, projected through that camera
   flight     horizon and the commanded hull direction (front camera)
-  panel      task, stage, depth, speed, error, gate, pose source, latch
+  title      task and stage
+  dials      depth, distance to the ground, and speed
   insets     the other two cameras, and a north-up map around the hull
 
 A runner adds to it with ``_hud_layers()``, which returns a dict with any
@@ -86,6 +87,24 @@ ATT_SKY = (210, 150, 55)
 ATT_GND = (45, 105, 155)
 ATT_RADIUS = 62          # px; sits on the 170 px map
 ATT_PITCH_FULL_DEG = 45.0  # ±this fills the ball
+DIAL_R = 40
+DEPTH_FULL_M = 10.0
+GROUND_FULL_M = 10.0
+SPEED_FULL_MPS = 1.0
+GROUND_STALE_S = 0.8
+
+
+def dial_tip(value, full: float):
+    """Unit offset of a gauge needle. Empty sits at 8 o'clock, full at 4.
+
+    The sweep passes through 12 o'clock. Image y grows downward, so the
+    angle is clockwise from the right.
+    """
+    frac = 0.0
+    if value is not None and math.isfinite(float(value)) and full > 0.0:
+        frac = max(0.0, min(1.0, float(value) / float(full)))
+    ang = math.radians(150.0 + 240.0 * frac)
+    return (math.cos(ang), math.sin(ang))
 
 
 def body_axes(q):
@@ -105,6 +124,18 @@ def rpy_from_q(q):
     pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
     yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
     return roll, pitch, yaw
+
+
+def compass_heading_deg(q) -> float:
+    """Degrees clockwise from north. ENU yaw 0 points east."""
+    return (90.0 - math.degrees(rpy_from_q(q)[2])) % 360.0
+
+
+def heading_east_north(q):
+    """Unit nose direction in the horizontal plane, (east, north)."""
+    fwd = body_axes(q)[0]
+    hn = math.hypot(fwd[0], fwd[1]) or 1.0
+    return (fwd[0] / hn, fwd[1] / hn)
 
 
 def attitude_horizon_shift(pitch_rad, radius: int = ATT_RADIUS,
@@ -173,7 +204,7 @@ class TaskHud:
         import cv2
         import numpy as np
         from rclpy.qos import qos_profile_sensor_data
-        from sensor_msgs.msg import CameraInfo, Image
+        from sensor_msgs.msg import CameraInfo, Image, LaserScan
 
         try:
             from apriltag_msgs.msg import AprilTagDetectionArray
@@ -202,6 +233,10 @@ class TaskHud:
         self._maps = {}
         self._map_status = None
         self._plan_pts = []
+        self._ground_m = None
+        self._ground_t = 0.0
+        node.create_subscription(
+            LaserScan, "/xudrone/range/bottom", self._on_ground, qos_profile_sensor_data)
         try:
             import json
             from nav_msgs.msg import OccupancyGrid, Path
@@ -368,10 +403,10 @@ class TaskHud:
         if cam == "front":
             self._draw_flight_path(img, pos, q, proj, clip)
             self._draw_command(img, cmd, intr, clip)
-        self._draw_panel(img, owner, pos, q, layers, cam, tm)
+        self._draw_title(img, owner, layers)
+        self._draw_dials(img, owner, pos)
         self._draw_insets(img, cam)
         self._draw_map(img, owner, pos, q, boat, layers, markers)
-        self._draw_footer(img, cmd, q)
         self._publish(img)
 
     def _draw_tags(self, img, cam, clip):
@@ -488,22 +523,91 @@ class TaskHud:
             cv2.putText(img, s, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 1, cv2.LINE_AA)
             y += step
 
-    def _draw_panel(self, img, owner, pos, q, layers, cam, tm):
+    def _on_ground(self, m):
+        if not m.ranges:
+            return
+        r = float(m.ranges[0])
+        if not math.isfinite(r) or r < float(m.range_min) or r > float(m.range_max):
+            return
+        self._ground_m = r
+        self._ground_t = time.time()
+
+    def _ground_range(self, owner):
+        if getattr(self, "_ground_m", None) is not None and time.time() - self._ground_t <= GROUND_STALE_S:
+            return self._ground_m
+        agl = getattr(owner, "_agl_m", None)
+        stamp = getattr(owner, "_agl_t", 0.0)
+        if agl is not None and time.time() - float(stamp) <= GROUND_STALE_S:
+            return float(agl)
+        return None
+
+    def _draw_title(self, img, owner, layers):
         stage = layers.get("stage") or getattr(owner, "stage", None) or getattr(owner, "_stage", None) or ""
-        if owner.phase == "handoff":
-            stage = "handoff to hold"
-        vel = getattr(owner, "vel", (0.0, 0.0, 0.0))
+        if getattr(owner, "phase", None) == "handoff":
+            stage = "handoff"
+        latch = getattr(getattr(owner, "latch", None), "state", "")
+        title = self.task.upper()
+        if stage:
+            title = f"{title}  {stage}"
+        if latch == "attached":
+            title = f"{title}  LATCHED"
+        cv2 = self._cv2
+        cv2.putText(img, title, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, WHITE, 1, cv2.LINE_AA)
+
+    def _draw_dials(self, img, owner, pos):
+        depth = None
+        if pos is not None:
+            depth = max(0.0, -float(pos[2]))
+        vel = getattr(owner, "vel", (0.0, 0.0, 0.0)) or (0.0, 0.0, 0.0)
         speed = math.sqrt(sum(float(v) * float(v) for v in vel))
-        err = getattr(owner, "_err_n", float("nan"))
-        lines = [
-            f"XUDRONE  {self.task.upper()}  {stage}",
-            f"t {tm:5.1f}s  depth {-float(pos[2]):.2f} m  speed {speed:.2f} m/s",
-            f"err {err:.2f} m  gate {getattr(owner, '_gate_rate', 1.0):.2f}  "
-            f"pose {getattr(owner, 'pose_source', '?')}  latch {owner.latch.state}  cam {cam}",
-        ]
-        lines += [str(s) for s in layers.get("lines", [])]
-        lines += self._map_status_lines()
-        self._text(img, lines, 8, 20)
+        h = img.shape[0]
+        cy = h - DIAL_R - 12
+        self._dial(img, 52, cy, "DEPTH", depth, DEPTH_FULL_M, CYAN, "m")
+        ground = self._ground_range(owner)
+        ground_color = RED if ground is not None and ground < 0.9 else AMBER
+        self._dial(img, 148, cy, "GROUND", ground, GROUND_FULL_M, ground_color, "m")
+        self._dial(img, 244, cy, "SPEED", speed, SPEED_FULL_MPS, GREEN, "m/s")
+
+    def _dial(self, img, cx, cy, label, value, full, color, unit):
+        cv2 = self._cv2
+        r = DIAL_R
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.circle(img, (cx, cy), r, (18, 18, 18), -1, cv2.LINE_AA)
+        cv2.circle(img, (cx, cy), r, GREY, 1, cv2.LINE_AA)
+        for frac in (0.0, 0.5, 1.0):
+            tip = dial_tip(frac * full, full)
+            cv2.circle(
+                img,
+                (int(cx + (r - 4) * tip[0]), int(cy + (r - 4) * tip[1])),
+                2, GREY, -1, cv2.LINE_AA,
+            )
+        reading = value is not None and math.isfinite(float(value))
+        if reading:
+            tip = dial_tip(value, full)
+            end = (int(cx + (r - 8) * tip[0]), int(cy + (r - 8) * tip[1]))
+            cv2.line(img, (cx, cy), end, color, 2, cv2.LINE_AA)
+            text = f"{float(value):.1f}"
+        else:
+            text = "--"
+        scale, thick = 0.72, 2
+        (tw, th), _base = cv2.getTextSize(text, font, scale, thick)
+        (uw, uh), ubase = cv2.getTextSize(unit, font, 0.42, 1)
+        nx, ny = int(cx - tw / 2), int(cy + 8)
+        ux, uy = int(cx - uw / 2), int(ny + uh + 4)
+        cv2.rectangle(
+            img,
+            (min(nx, ux) - 2, ny - th - 2),
+            (max(nx + tw, ux + uw) + 2, uy + ubase + 1),
+            (18, 18, 18), -1,
+        )
+        cv2.putText(img, text, (nx, ny), font, scale, WHITE, thick, cv2.LINE_AA)
+        cv2.putText(img, unit, (ux, uy), font, 0.42, color, 1, cv2.LINE_AA)
+        cv2.putText(img, label, (cx - r + 4, cy - r - 4), font, 0.36, color, 1, cv2.LINE_AA)
+
+    def _draw_panel(self, img, owner, pos, q, layers, cam, tm):
+        """Kept for older callers. The live frame uses the title and the dials."""
+        self._draw_title(img, owner, layers)
+        self._draw_dials(img, owner, pos)
 
     def _map_status_lines(self):
         """Global map / plan / factor-graph summary for the telemetry panel."""
@@ -635,19 +739,11 @@ class TaskHud:
             if mk.get("label") == "otter_k":
                 continue
             cv2.circle(img, mp(mk["pos"]), 3, mk.get("color", WHITE), -1, cv2.LINE_AA)
-        fwd = body_axes(q)[0]
-        hn = math.hypot(fwd[0], fwd[1]) or 1.0
-        fx, fy = fwd[0] / hn, fwd[1] / hn
-        c = map_pixel(center, center, scale)
-        tri = []
-        for along, side in ((9.0, 0.0), (-6.0, 5.0), (-6.0, -5.0)):
-            ex = along * fx - side * fy
-            ny = along * fy + side * fx
-            tri.append((int(x0 + c[0] + ex), int(y0 + c[1] - ny)))
-        cv2.fillPoly(img, [np.array(tri, np.int32)], YELLOW)
         cv2.putText(img, "N", (x0 + px // 2 - 4, y0 + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, WHITE, 1, cv2.LINE_AA)
         # Aviation attitude ball centred on the map (roll / pitch ADI).
-        self._draw_attitude(img, x0 + px // 2, y0 + px // 2, ATT_RADIUS, q)
+        cx, cy = x0 + px // 2, y0 + px // 2
+        self._draw_attitude(img, cx, cy, ATT_RADIUS, q)
+        self._draw_heading(img, cx, cy, q)
 
     def _draw_attitude(self, img, cx, cy, radius, q):
         """Circular roll/pitch attitude indicator (aviation ADI) over the map."""
@@ -657,7 +753,9 @@ class TaskHud:
         d = 2 * r + 4
         mid = d // 2
         tile = np.zeros((d, d, 3), np.uint8)
-        shift = attitude_horizon_shift(pitch, r)
+        # Vehicle pitch is nose-down positive. The ball is nose-up positive,
+        # so a nose-down hull raises the horizon and shows more ground.
+        shift = attitude_horizon_shift(-pitch, r)
         hy = int(round(mid + shift))
         tile[: max(0, min(d, hy)), :] = ATT_SKY
         tile[max(0, min(d, hy)) :, :] = ATT_GND
@@ -707,23 +805,37 @@ class TaskHud:
         cv2.fillPoly(
             img,
             [np.array([(top[0], top[1] + 7), (top[0] - 5, top[1] - 1), (top[0] + 5, top[1] - 1)], np.int32)],
-            YELLOW,
+            WHITE,
         )
         # Fixed wing / waterline symbol.
         cv2.line(img, (cx_i - r // 2, cy_i), (cx_i - 7, cy_i), YELLOW, 2, cv2.LINE_AA)
         cv2.line(img, (cx_i + 7, cy_i), (cx_i + r // 2, cy_i), YELLOW, 2, cv2.LINE_AA)
         cv2.circle(img, (cx_i, cy_i), 3, YELLOW, 1, cv2.LINE_AA)
+
+    def _draw_heading(self, img, cx, cy, q):
+        """Nose arrow and compass heading, drawn over the attitude ball.
+
+        North stays at the top of the map. The arrow is the hull's horizontal
+        nose, and the digits under the ball are degrees clockwise from north.
+        """
+        cv2, np = self._cv2, self._np
+        east, north = heading_east_north(q)
+        tri = []
+        for along, side in ((48.0, 0.0), (-22.0, 13.0), (-22.0, -13.0)):
+            ex = along * east - side * north
+            ny = along * north + side * east
+            tri.append((int(cx + ex), int(cy - ny)))
+        cv2.fillPoly(img, [np.array(tri, np.int32)], YELLOW)
+        label = f"{compass_heading_deg(q):03.0f}"
         cv2.putText(
-            img,
-            f"R{math.degrees(roll):+.0f} P{math.degrees(pitch):+.0f}",
-            (cx_i - r + 4, cy_i + r - 6),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.32, WHITE, 1, cv2.LINE_AA,
+            img, label, (int(cx) - 14, int(cy) + ATT_RADIUS + 16),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.45, YELLOW, 1, cv2.LINE_AA,
         )
 
     def _draw_footer(self, img, cmd, q):
         thrust, _roll, pitch_u, yaw_u = cmd
-        roll, pitch, yaw = rpy_from_q(q)
-        heading = (90.0 - math.degrees(yaw)) % 360.0
+        roll, pitch, _yaw = rpy_from_q(q)
+        heading = compass_heading_deg(q)
         line = (f"hdg {heading:03.0f}  roll {math.degrees(roll):+.0f}  "
                 f"pitch {math.degrees(pitch):+.0f}  "
                 f"thrust {thrust:+.2f}  pitch_u {pitch_u:+.2f}  yaw_u {yaw_u:+.2f}")

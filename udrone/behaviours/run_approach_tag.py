@@ -66,6 +66,19 @@ SURF_MIN_M = float(os.environ.get("UDRONE_IBVS_SURF_MIN", "0.35"))
 DEPTH_SHALLOW = float(os.environ.get("UDRONE_IBVS_DEPTH_SHALLOW", "-0.35"))
 DEPTH_DEEP = float(os.environ.get("UDRONE_IBVS_DEPTH_DEEP", "-9.30"))
 RANGE_STALE_S = float(os.environ.get("UDRONE_IBVS_RANGE_STALE", "0.8"))
+AIM_PITCH_RAD = 0.25
+AIM_YAW_RAD = 0.35
+
+
+def los_hold_thrust(elev, nose_down, yaw_err, surge) -> float:
+    """Thrust while the front camera has not seen the tag yet.
+
+    Hold still until the nose is on the line, then follow it. A steep line
+    is a descent, and the surge limit already keeps that descent small.
+    """
+    if abs(-float(elev) - float(nose_down)) > AIM_PITCH_RAD or abs(float(yaw_err)) > AIM_YAW_RAD:
+        return 0.0
+    return min(HOLD_THRUST, float(surge))
 
 
 def _tag_side_px(corners) -> float:
@@ -260,7 +273,9 @@ class UdroneApproachController(UdroneHelixController):
         surf = self._fresh_range(self._surf_m, self._surf_t)
         note = None
         if z > DEPTH_SHALLOW and thrust >= 0.0:
-            pitch_u = max(pitch_u, 0.12)
+            # Stay in the water, but do not keep pitching through the aim line.
+            if nose_down < 0.15:
+                pitch_u = max(pitch_u, 0.12)
             thrust = min(thrust, 0.06)
             note = f"shallow z={z:.2f}"
         elif z < DEPTH_DEEP:
@@ -498,13 +513,12 @@ class UdroneApproachController(UdroneHelixController):
         bearing = math.atan2(axis[1], axis[0])
         horiz = math.hypot(axis[0], axis[1])
         elev = math.atan2(axis[2], max(horiz, 1e-3))
-        # Point the front camera at the stored tag. No surge while that
-        # line is still steep, so the handoff is not a dive.
+        # Point the front camera at the stored tag, then follow that line.
+        yaw_err = wrap_pi(bearing - yaw)
         pitch_u = clamp(1.2 * (-elev - nose_down), RATE_MAX)
-        yaw_u = clamp(1.2 * wrap_pi(bearing - yaw), RATE_MAX)
-        if elev < -0.55 or nose_down > 0.70:
-            return pitch_u, yaw_u, 0.0
-        return pitch_u, yaw_u, min(HOLD_THRUST, self._surge(nose_down))
+        yaw_u = clamp(1.2 * yaw_err, RATE_MAX)
+        thrust = los_hold_thrust(elev, nose_down, yaw_err, self._surge(nose_down))
+        return pitch_u, yaw_u, thrust
 
     def _events(self, tm: float):
         if self._stage == "done":

@@ -35,7 +35,9 @@ dock-centred grid and finishes the dive before the leg translates. A closed
 ring that matches the authored hoop starts one pursuit reference: dive in
 place, slide onto the centreline, then cruise at 0.32 m/s and brake to a
 stop at the exit. The nose stays free. The through-direction is frozen at
-entry. The ring does not have to be centered in the image.
+entry. The ring does not have to be centered in the image. When the camera loses
+the ring, the hull keeps the last plan for 6 s and then the search resumes.
+It does not invent a ring.
 A pass (`hoop_pass`) needs one sample inside the authored opening (radial
 ≤ 0.40 m, logged as `HOOP_PLANE`) and later arrival within 0.6 m of the
 frozen exit (`HOOP_EXIT`). Time in the punch and a close camera crop do not
@@ -51,9 +53,13 @@ rendezvous; down during the `approach_tag` search, then front once the tag
 is fixed). On that camera it
 adds the AprilTag boxes and the projected reference, targets, and boat. The front
 camera also gets the horizon, the commanded hull direction, and the command arrow.
-Around the edges sit a telemetry panel, the other two cameras, and a north-up
+Around the edges sit the task name, three dials (depth and ground in m,
+speed in m/s), the other two cameras, and a north-up
 map that carries the bed depth and obstacles from `xudrone_mapper` (see the pack
-[README](../README.md#mapping)). A runner adds its own layer with `_hud_layers()`: the hoop adds the ring
+[README](../README.md#mapping)). The map's N stays at the top. A yellow arrow
+on the attitude ball is the hull's nose, and the digits under the ball are
+the compass heading. The mark at the top of the ball is bank, and a
+nose-down hull shows more ground. A runner adds its own layer with `_hud_layers()`: the hoop adds the ring
 box, planned path, end, and fix; the rendezvous adds an ILS-style glide path
 (`glide_path`: aft→under funnel + nest-axis dock rails/cone), nest, lateral/tilt,
 and dock state (front cam through the glide, up cam from the flare). Geometry is in `rendezvous_geom`
@@ -67,9 +73,17 @@ while the down camera searches for the bed tag. Image-down on that camera
 is hull-aft, so a tag high in the image is ahead of the hull. The first
 sighting stores the tag point and hands the lock to the front camera,
 which aims from the current hull position at that point until the tag
-appears in the front image. After that, yaw and pitch hold the tag at
+appears in the front image. Thrust stays off until the nose is on that
+line, then a limited surge follows it, including a descent from the
+surface. After the tag is in the front image, yaw and pitch hold it at
 the centre of the front image and a steady surge closes along that line.
-At 2 m the hull brakes in reverse and levels, then the approach succeeds.
+At 2 m the hull brakes in reverse and levels. If it is still deeper than
+about 6 m, it climbs before the approach is finished. Thrust is only along
+the nose, so the climb pitches to about 20° nose-up and surges. That glide
+carries the hull along the approach heading, about 5 m for a 2 m climb, and
+the next task starts from that offset. The approach succeeds once the depth
+is about 6 m and the nose is near level, so the next task does not inherit
+a dive onto the bed.
 A dark front frame keeps aiming at the stored point. Clearance
 uses `/xudrone/range/{bottom,surface}` (EchoRanger + upward beam) plus pose
 depth to keep off the bed and the free surface.
